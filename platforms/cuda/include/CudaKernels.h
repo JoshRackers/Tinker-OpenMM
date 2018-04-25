@@ -1362,7 +1362,7 @@ public:
     enum GlobalTargetType {DT, VARIABLE, PARAMETER};
     CudaIntegrateCustomStepKernel(std::string name, const Platform& platform, CudaContext& cu) : IntegrateCustomStepKernel(name, platform), cu(cu),
             hasInitializedKernels(false), localValuesAreCurrent(false), globalValues(NULL), sumBuffer(NULL), summedValue(NULL), uniformRandoms(NULL),
-            randomSeed(NULL), perDofEnergyParamDerivs(NULL), perDofValues(NULL), needsEnergyParamDerivs(false) {
+            randomSeed(NULL), perDofEnergyParamDerivs(NULL), perDofValues(NULL), needsEnergyParamDerivs(false), moleculeAtoms(NULL),moleculeStartIndex(NULL) {
     }
     ~CudaIntegrateCustomStepKernel();
     /**
@@ -1424,6 +1424,8 @@ public:
      * @param values    a vector containing the values
      */
     void setPerDofVariable(ContextImpl& context, int variable, const std::vector<Vec3>& values);
+    void scaleBox(ContextImpl& context ,CustomIntegrator& integrator);
+    void scaleCoordinates(ContextImpl& context, double scaleX, double scaleY, double scaleZ);
 private:
     class ReorderListener;
     class GlobalTarget;
@@ -1462,7 +1464,7 @@ private:
     std::vector<std::vector<CUfunction> > kernels;
     std::vector<std::vector<std::vector<void*> > > kernelArgs;
     std::vector<void*> kineticEnergyArgs;
-    CUfunction randomKernel, kineticEnergyKernel, sumKineticEnergyKernel;
+    CUfunction randomKernel, kineticEnergyKernel, sumKineticEnergyKernel,scalekernel;
     std::vector<CustomIntegrator::ComputationType> stepType;
     std::vector<CustomIntegratorUtilities::Comparison> comparisons;
     std::vector<std::vector<Lepton::CompiledExpression> > globalExpressions;
@@ -1483,6 +1485,12 @@ private:
     int gaussianVariableIndex, uniformVariableIndex, dtVariableIndex;
     std::vector<std::string> parameterNames;
     std::vector<GlobalTarget> stepTarget;
+    bool hasInitializedKernels2;
+    int numMolecules;
+    CudaArray* moleculeAtoms;
+    CudaArray* moleculeStartIndex;
+    float Kinetic;
+    std::vector<int> lastAtomOrder;
 };
 
 class CudaIntegrateCustomStepKernel::GlobalTarget {

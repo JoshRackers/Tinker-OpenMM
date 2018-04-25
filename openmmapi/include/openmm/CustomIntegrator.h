@@ -284,7 +284,9 @@ public:
         /**
          * End an "if" or "while" block.
          */
-        BlockEnd = 8
+        BlockEnd = 8,
+	ScaleBox=9,
+	SaveVelocity=10
     };
     /**
      * Create a CustomIntegrator.
@@ -453,6 +455,8 @@ public:
      * @return the index of the step that was added
      */
     int addUpdateContextState();
+    int addScaleBox();
+    int addSaveVelocities();
     /**
      * Add a step which begins a new "if" block.
      *

@@ -555,6 +555,7 @@ void CudaCalcHarmonicBondForceKernel::initialize(const System& system, const Har
     replacements["APPLY_PERIODIC"] = (force.usesPeriodicBoundaryConditions() ? "1" : "0");
     replacements["COMPUTE_FORCE"] = CudaKernelSources::harmonicBondForce;
     replacements["PARAMS"] = cu.getBondedUtilities().addArgument(params->getDevicePointer(), "float2");
+    replacements["POSQ"]= cu.getBondedUtilities().addArgument(cu.getPosq().getDevicePointer(),"float4");
     cu.getBondedUtilities().addInteraction(atoms, cu.replaceStrings(CudaKernelSources::bondForce, replacements), force.getForceGroup());
     cu.addForce(new CudaHarmonicBondForceInfo(force));
 }
@@ -6886,6 +6887,9 @@ void CudaIntegrateCustomStepKernel::initialize(const System& system, const Custo
     perDofValues = new CudaParameterSet(cu, integrator.getNumPerDofVariables(), 3*system.getNumParticles(), "perDofVariables", false, cu.getUseDoublePrecision() || cu.getUseMixedPrecision());
     cu.addReorderListener(new ReorderListener(cu, *perDofValues, localPerDofValuesFloat, localPerDofValuesDouble, deviceValuesAreCurrent));
     SimTKOpenMMUtilities::setRandomNumberSeed(integrator.getRandomNumberSeed());
+    CUmodule module2 = cu.createModule(CudaKernelSources::monteCarloBarostat);
+    scalekernel = cu.getKernel(module2, "scalePositions");
+    hasInitializedKernels2 = false;
 }
 
 string CudaIntegrateCustomStepKernel::createPerDofComputation(const string& variable, const Lepton::ParsedExpression& expr, int component, CustomIntegrator& integrator, const string& forceName, const string& energyName) {
@@ -7494,7 +7498,12 @@ void CudaIntegrateCustomStepKernel::execute(ContextImpl& context, CustomIntegrat
         else if (stepType[step] == CustomIntegrator::BlockEnd) {
             if (blockEnd[step] != -1)
                 nextStep = blockEnd[step]; // Return to the start of a while block.
-        }
+        } else if (stepType[step] == CustomIntegrator::ScaleBox) {
+				scaleBox(context,integrator);
+        }else if (stepType[step]== CustomIntegrator::SaveVelocity){
+	        bool forcesValid=true;
+		Kinetic=computeKineticEnergy(context, integrator, forcesValid);
+	}
         if (invalidatesForces[step])
             forcesAreValid = false;
         step = nextStep;
@@ -7511,7 +7520,65 @@ void CudaIntegrateCustomStepKernel::execute(ContextImpl& context, CustomIntegrat
         validSavedForces.clear();
     }
 }
+void CudaIntegrateCustomStepKernel::scaleBox(ContextImpl& context,CustomIntegrator& integrator){
+    Vec3 box[3];
+    context.getPeriodicBoxVectors(box[0], box[1], box[2]);
+    double volume = box[0][0]*box[1][1]*box[2][2];
+    vector<float> fastvirial(9);
+    fastvirial=cu.getFastVirial();
+    vector<float> slowvirial(9);
+    slowvirial=cu.getSlowVirial();
+    cu.ResetFastVirial();
+    cu.ResetSlowVirial();	
+    double innersteps= integrator.getGlobalVariableByName("NinnerSteps");
+    printf("xvirial%g\n",fastvirial[0]/innersteps+slowvirial[0]);
+    printf("yvirial%g\n",fastvirial[4]/innersteps+slowvirial[4]); 
+    printf("zvirial%g\n",fastvirial[8]/innersteps+slowvirial[8]); 
+    double PressureConstant= 16.39; //kcal/mol/(cubic nm)
+    double factor= PressureConstant/volume;
+    bool forcesValid=true;
+    double actualPressure = factor*(-1.0*(fastvirial[0]/innersteps+slowvirial[0])-(fastvirial[4]/innersteps+slowvirial[4])-(fastvirial[8]/innersteps+slowvirial[8])+2.0*Kinetic)/3.0;
+    float lengthScale=pow((1.0+0.003*0.000046/2.0*(actualPressure-1.0)),1.0/3.0);
+printf("actual pressure  %g\n",lengthScale);
+    	scaleCoordinates(context, lengthScale, lengthScale, lengthScale);
+    	context.getOwner().setPeriodicBoxVectors(box[0]*lengthScale, box[1]*lengthScale, box[2]*lengthScale);
+}void CudaIntegrateCustomStepKernel::scaleCoordinates(ContextImpl& context, double scaleX, double scaleY, double scaleZ) {
+    cu.setAsCurrent();
+    if (!hasInitializedKernels2) {
+        hasInitializedKernels2 = true;
 
+        // Create the arrays with the molecule definitions.
+
+        vector<vector<int> > molecules = context.getMolecules();
+        numMolecules = molecules.size();
+        moleculeAtoms = CudaArray::create<int>(cu, cu.getNumAtoms(), "moleculeAtoms");
+        moleculeStartIndex = CudaArray::create<int>(cu, numMolecules+1, "moleculeStartIndex");
+        vector<int> atoms(moleculeAtoms->getSize());
+        vector<int> startIndex(moleculeStartIndex->getSize());
+        int index = 0;
+        for (int i = 0; i < numMolecules; i++) {
+            startIndex[i] = index;
+            for (int molecule : molecules[i])
+                atoms[index++] = molecule;
+        }
+        startIndex[numMolecules] = index;
+        moleculeAtoms->upload(atoms);
+        moleculeStartIndex->upload(startIndex);
+
+        // Initialize the kernel arguments.
+        
+    }
+    float scalefX = (float) scaleX;
+    float scalefY = (float) scaleY;
+    float scalefZ = (float) scaleZ;
+    void* args[] = {&scalefX, &scalefY, &scalefZ, &numMolecules, cu.getPeriodicBoxSizePointer(), cu.getInvPeriodicBoxSizePointer(),
+                    cu.getPeriodicBoxVecXPointer(), cu.getPeriodicBoxVecYPointer(), cu.getPeriodicBoxVecZPointer(),
+		    &cu.getPosq().getDevicePointer(), &moleculeAtoms->getDevicePointer(), &moleculeStartIndex->getDevicePointer()};
+    cu.executeKernel(scalekernel, args, cu.getNumAtoms());
+    for (auto& offset : cu.getPosCellOffsets())
+        offset = make_int4(0, 0, 0, 0);
+    lastAtomOrder = cu.getAtomIndex();
+}
 bool CudaIntegrateCustomStepKernel::evaluateCondition(int step) {
     expressionSet.setVariable(uniformVariableIndex, SimTKOpenMMUtilities::getUniformlyDistributedRandomNumber());
     expressionSet.setVariable(gaussianVariableIndex, SimTKOpenMMUtilities::getNormallyDistributedRandomNumber());

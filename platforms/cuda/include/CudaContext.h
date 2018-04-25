@@ -577,6 +577,12 @@ public:
      * and order to be revalidated.
      */
     void invalidateMolecules();
+std::vector<float> getFastVirial() const ;
+std::vector<float> getSlowVirial() const;
+CudaArray* getFastVirialPointer() const;
+CudaArray* getSlowVirialPointer() const;
+void ResetFastVirial();
+void ResetSlowVirial();
 private:
     /**
      * Compute a sorted list of device indices in decreasing order of desirability
@@ -638,6 +644,8 @@ private:
     CudaArray* energyBuffer;
     CudaArray* energyParamDerivBuffer;
     CudaArray* atomIndexDevice;
+    CudaArray* FastVirial;
+    CudaArray* SlowVirial;
     std::vector<std::string> energyParamDerivNames;
     std::map<std::string, double> energyParamDerivWorkspace;
     std::vector<int> atomIndex;

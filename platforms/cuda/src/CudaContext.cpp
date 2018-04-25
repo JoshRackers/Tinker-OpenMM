@@ -374,7 +374,10 @@ CudaContext::CudaContext(const System& system, int deviceIndex, bool useBlocking
     thread = new WorkThread();
 
     // Create utilities objects.
-
+    SlowVirial = CudaArray::create<float>(*this, 9, "SlowVirial");
+    FastVirial = CudaArray::create<float>(*this, 9, "FastVirial");
+    this->ResetSlowVirial();
+    this->ResetFastVirial();
     bonded = new CudaBondedUtilities(*this);
     nonbonded = new CudaNonbondedUtilities(*this);
     integration = new CudaIntegrationUtilities(*this, system);
@@ -417,6 +420,10 @@ CudaContext::~CudaContext() {
         delete nonbonded;
     if (thread != NULL)
         delete thread;
+    if (FastVirial != NULL)
+        delete FastVirial;
+    if (SlowVirial != NULL)
+        delete SlowVirial;
     string errorMessage = "Error deleting Context";
     if (contextIsValid) {
         cuProfilerStop();
@@ -1482,4 +1489,28 @@ vector<int> CudaContext::getDevicePrecedence() {
     }
 
     return precedence;
+}
+std::vector<float> CudaContext::getFastVirial() const{
+	vector<float> output(9);
+	FastVirial->download(output);
+	return output;
+}
+std::vector<float> CudaContext::getSlowVirial() const{
+	vector<float> output(9);
+	SlowVirial->download(output);
+	return output;
+}CudaArray* CudaContext::getFastVirialPointer() const{
+	return FastVirial;
+}CudaArray* CudaContext::getSlowVirialPointer()const {
+	return SlowVirial;
+}void CudaContext::ResetSlowVirial(){
+	vector<float> zero(9);
+	for( int i=0; i< 9; i++){
+		zero[i]=0.0f;
+	}SlowVirial->upload(zero);
+}void CudaContext::ResetFastVirial(){
+	vector<float> zero(9);
+	for( int i=0; i< 9; i++){
+		zero[i]=0.0f;
+	}FastVirial->upload(zero);
 }

@@ -4,6 +4,7 @@ typedef struct {
     real3 pos, force, torque, inducedDipole, inducedDipolePolar, sphericalDipole;
     real q;
     float thole, damp;
+    real3 virialp1,virialp2,virialp3;
 #ifdef INCLUDE_QUADRUPOLES
     real sphericalQuadrupole[5];
 #endif
@@ -397,6 +398,21 @@ __device__ void computeOneInteraction(AtomData& atom1, AtomData& atom2, bool has
                              qiRotationMatrix[1][2]*qiForce[0] + qiRotationMatrix[2][2]*qiForce[1] + qiRotationMatrix[0][2]*qiForce[2],
                              qiRotationMatrix[1][0]*qiForce[0] + qiRotationMatrix[2][0]*qiForce[1] + qiRotationMatrix[0][0]*qiForce[2]);
     atom1.force += force;
+    float vxx= delta.x*force.x;
+    float vxy=  delta.y*force.x;
+    float vxz=  delta.z*force.x;
+    float vyy= delta.y*force.y;
+    float vyz= delta.z*force.y;
+    float vzz= delta.z*force.z;
+    atom1.virialp1.x+=forceFactor*vxx;
+    atom1.virialp1.y+=forceFactor*vxy;
+    atom1.virialp1.z+=forceFactor*vxz;
+    atom1.virialp2.x+=forceFactor*vxy;
+    atom1.virialp2.y+=forceFactor*vyy;
+    atom1.virialp2.z+=forceFactor*vyz;	
+    atom1.virialp3.x+=forceFactor*vxz;
+    atom1.virialp3.y+=forceFactor*vyz;
+    atom1.virialp3.z+=forceFactor*vzz;
     atom1.torque += make_real3(qiRotationMatrix[1][1]*qiTorqueI[0] + qiRotationMatrix[2][1]*qiTorqueI[1] + qiRotationMatrix[0][1]*qiTorqueI[2],
                                qiRotationMatrix[1][2]*qiTorqueI[0] + qiRotationMatrix[2][2]*qiTorqueI[1] + qiRotationMatrix[0][2]*qiTorqueI[2],
                                qiRotationMatrix[1][0]*qiTorqueI[0] + qiRotationMatrix[2][0]*qiTorqueI[1] + qiRotationMatrix[0][0]*qiTorqueI[2]);
@@ -411,7 +427,7 @@ __device__ void computeOneInteraction(AtomData& atom1, AtomData& atom2, bool has
 /**
  * Compute the self energy and self torque.
  */
-__device__ void computeSelfEnergyAndTorque(AtomData& atom1, mixed& energy) {
+__device__ void computeSelfEnergyAndTorque(AtomData& atom1, mixed& energy, int atom1index, float* __restrict__ selfTorque ) {
     real cii = atom1.q*atom1.q;
     real3 dipole = make_real3(atom1.sphericalDipole.y, atom1.sphericalDipole.z, atom1.sphericalDipole.x);
     real dii = dot(dipole, dipole+(atom1.inducedDipole+atom1.inducedDipolePolar)*0.5f);
@@ -432,14 +448,18 @@ __device__ void computeSelfEnergyAndTorque(AtomData& atom1, mixed& energy) {
     // self-torque for PME
 
     real3 ui = atom1.inducedDipole+atom1.inducedDipolePolar;
-    atom1.torque += ((2/(real) 3)*(EWALD_ALPHA*EWALD_ALPHA*EWALD_ALPHA)/SQRT_PI)*cross(dipole, ui);
+    real3 selfTorquevalue=((2/(real) 3)*(EWALD_ALPHA*EWALD_ALPHA*EWALD_ALPHA)/SQRT_PI)*cross(dipole, ui);
+    atom1.torque += selfTorquevalue;
+    selfTorque[atom1index]= (float) selfTorquevalue.x*ENERGY_SCALE_FACTOR;
+    selfTorque[atom1index+PADDED_NUM_ATOMS]=  (float) selfTorquevalue.y*ENERGY_SCALE_FACTOR;
+    selfTorque[atom1index+PADDED_NUM_ATOMS*2]=  (float) selfTorquevalue.z*ENERGY_SCALE_FACTOR;
 }
 
 /**
  * Compute electrostatic interactions.
  */
 extern "C" __global__ void computeElectrostatics(
-        unsigned long long* __restrict__ forceBuffers, unsigned long long* __restrict__ torqueBuffers, mixed* __restrict__ energyBuffer,
+        unsigned long long* __restrict__ forceBuffers, unsigned long long* __restrict__ torqueBuffers, float* __restrict__ selfTorques, mixed* __restrict__ energyBuffer, float* __restrict__ virial,
         const real4* __restrict__ posq, const uint2* __restrict__ covalentFlags, const unsigned int* __restrict__ polarizationGroupFlags,
         const ushort2* __restrict__ exclusionTiles, unsigned int startTileIndex, unsigned int numTileIndices,
 #ifdef USE_CUTOFF
@@ -454,6 +474,9 @@ extern "C" __global__ void computeElectrostatics(
     const unsigned int tgx = threadIdx.x & (TILE_SIZE-1);
     const unsigned int tbx = threadIdx.x - tgx;
     mixed energy = 0;
+    real3 virialp1=make_real3(0);
+    real3 virialp2=make_real3(0);
+    real3 virialp3= make_real3(0);
     __shared__ AtomData localData[THREAD_BLOCK_SIZE];
 
     // First loop: process tiles that contain exclusions.
@@ -468,6 +491,9 @@ extern "C" __global__ void computeElectrostatics(
         unsigned int atom1 = x*TILE_SIZE + tgx;
         loadAtomData(data, atom1, posq, sphericalDipole, sphericalQuadrupole, inducedDipole, inducedDipolePolar, dampingAndThole);
         data.force = make_real3(0);
+	data.virialp1=make_real3(0);
+	data.virialp2=make_real3(0);
+        data.virialp3= make_real3(0);
         data.torque = make_real3(0);
         uint2 covalent = covalentFlags[pos*TILE_SIZE+tgx];
         unsigned int polarizationGroup = polarizationGroupFlags[pos*TILE_SIZE+tgx];
@@ -501,8 +527,11 @@ extern "C" __global__ void computeElectrostatics(
                 }
             }
             if (atom1 < NUM_ATOMS)
-                computeSelfEnergyAndTorque(data, energy);
+                computeSelfEnergyAndTorque(data, energy,atom1,selfTorques);
             data.force *= -ENERGY_SCALE_FACTOR;
+	    data.virialp1*=-ENERGY_SCALE_FACTOR;
+	    data.virialp2*=-ENERGY_SCALE_FACTOR;
+            data.virialp3*=-ENERGY_SCALE_FACTOR;
             data.torque *= ENERGY_SCALE_FACTOR;
             atomicAdd(&forceBuffers[atom1], static_cast<unsigned long long>((long long) (data.force.x*0x100000000)));
             atomicAdd(&forceBuffers[atom1+PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long) (data.force.y*0x100000000)));
@@ -510,13 +539,26 @@ extern "C" __global__ void computeElectrostatics(
             atomicAdd(&torqueBuffers[atom1], static_cast<unsigned long long>((long long) (data.torque.x*0x100000000)));
             atomicAdd(&torqueBuffers[atom1+PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long) (data.torque.y*0x100000000)));
             atomicAdd(&torqueBuffers[atom1+2*PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long) (data.torque.z*0x100000000)));
-        }
+	    virialp1.x+=data.virialp1.x;
+	    virialp1.y+=data.virialp1.y;
+	    virialp1.z+=data.virialp1.z;
+	    virialp2.x+=data.virialp2.x;
+	    virialp2.y+=data.virialp2.y;
+	    virialp2.z+=data.virialp2.z;
+	    virialp3.x+=data.virialp3.x;
+	    virialp3.y+=data.virialp3.y;
+	    virialp3.z+=data.virialp3.z;           
+
+	}
         else {
             // This is an off-diagonal tile.
 
             unsigned int j = y*TILE_SIZE + tgx;
             loadAtomData(localData[threadIdx.x], j, posq, sphericalDipole, sphericalQuadrupole, inducedDipole, inducedDipolePolar, dampingAndThole);
             localData[threadIdx.x].force = make_real3(0);
+localData[threadIdx.x].virialp1=make_real3(0);
+	localData[threadIdx.x].virialp2=make_real3(0);
+       localData[threadIdx.x].virialp3= make_real3(0);
             localData[threadIdx.x].torque = make_real3(0);
             unsigned int tj = tgx;
             for (j = 0; j < TILE_SIZE; j++) {
@@ -530,8 +572,14 @@ extern "C" __global__ void computeElectrostatics(
                 tj = (tj + 1) & (TILE_SIZE - 1);
             }
             data.force *= -ENERGY_SCALE_FACTOR;
-            data.torque *= ENERGY_SCALE_FACTOR;
+            data.virialp1*=-ENERGY_SCALE_FACTOR;
+            data.virialp2*=-ENERGY_SCALE_FACTOR;        
+            data.virialp3*=-ENERGY_SCALE_FACTOR;
+	    data.torque *= ENERGY_SCALE_FACTOR;
             localData[threadIdx.x].force *= -ENERGY_SCALE_FACTOR;
+ 	    localData[threadIdx.x].virialp1 *= -ENERGY_SCALE_FACTOR;
+ 	    localData[threadIdx.x].virialp2 *= -ENERGY_SCALE_FACTOR;
+ 	    localData[threadIdx.x].virialp3 *= -ENERGY_SCALE_FACTOR;
             localData[threadIdx.x].torque *= ENERGY_SCALE_FACTOR;
             unsigned int offset = x*TILE_SIZE + tgx;
             atomicAdd(&forceBuffers[offset], static_cast<unsigned long long>((long long) (data.force.x*0x100000000)));
@@ -540,6 +588,15 @@ extern "C" __global__ void computeElectrostatics(
             atomicAdd(&torqueBuffers[offset], static_cast<unsigned long long>((long long) (data.torque.x*0x100000000)));
             atomicAdd(&torqueBuffers[offset+PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long) (data.torque.y*0x100000000)));
             atomicAdd(&torqueBuffers[offset+2*PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long) (data.torque.z*0x100000000)));
+	    virialp1.x+=data.virialp1.x;
+	    virialp1.y+=data.virialp1.y;
+	    virialp1.z+=data.virialp1.z;
+	    virialp2.x+=data.virialp2.x;
+	    virialp2.y+=data.virialp2.y;
+	    virialp2.z+=data.virialp2.z;
+	    virialp3.x+=data.virialp3.x;
+	    virialp3.y+=data.virialp3.y;
+	    virialp3.z+=data.virialp3.z;    
             offset = y*TILE_SIZE + tgx;
             atomicAdd(&forceBuffers[offset], static_cast<unsigned long long>((long long) (localData[threadIdx.x].force.x*0x100000000)));
             atomicAdd(&forceBuffers[offset+PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long) (localData[threadIdx.x].force.y*0x100000000)));
@@ -610,6 +667,9 @@ extern "C" __global__ void computeElectrostatics(
             AtomData data;
             loadAtomData(data, atom1, posq, sphericalDipole, sphericalQuadrupole, inducedDipole, inducedDipolePolar, dampingAndThole);
             data.force = make_real3(0);
+ 		 data.virialp1=make_real3(0);
+        data.virialp2=make_real3(0);
+        data.virialp3= make_real3(0);
             data.torque = make_real3(0);
 #ifdef USE_CUTOFF
             unsigned int j = interactingAtoms[pos*TILE_SIZE+tgx];
@@ -620,22 +680,29 @@ extern "C" __global__ void computeElectrostatics(
             loadAtomData(localData[threadIdx.x], j, posq, sphericalDipole, sphericalQuadrupole, inducedDipole, inducedDipolePolar, dampingAndThole);
             localData[threadIdx.x].force = make_real3(0);
             localData[threadIdx.x].torque = make_real3(0);
-
+	    localData[threadIdx.x].virialp1=make_real3(0);
+            localData[threadIdx.x].virialp2=make_real3(0);
+            localData[threadIdx.x].virialp3= make_real3(0);
             // Compute forces.
 
             unsigned int tj = tgx;
             for (j = 0; j < TILE_SIZE; j++) {
                 int atom2 = atomIndices[tbx+tj];
                 if (atom1 < NUM_ATOMS && atom2 < NUM_ATOMS) {
-                    computeOneInteraction(data, localData[tbx+tj], false, 1, 1, 1, 1, energy, periodicBoxSize, invPeriodicBoxSize, periodicBoxVecX, periodicBoxVecY, periodicBoxVecZ);
+                    computeOneInteraction(data, localData[tbx+tj], false, 1, 1, 1, 1, energy,periodicBoxSize, invPeriodicBoxSize, periodicBoxVecX, periodicBoxVecY, periodicBoxVecZ);
                 }
                 tj = (tj + 1) & (TILE_SIZE - 1);
             }
             data.force *= -ENERGY_SCALE_FACTOR;
-            data.torque *= ENERGY_SCALE_FACTOR;
+            data.virialp1*=-ENERGY_SCALE_FACTOR;
+            data.virialp2*=-ENERGY_SCALE_FACTOR;
+            data.virialp3*=-ENERGY_SCALE_FACTOR;
+	     data.torque *= ENERGY_SCALE_FACTOR;
             localData[threadIdx.x].force *= -ENERGY_SCALE_FACTOR;
             localData[threadIdx.x].torque *= ENERGY_SCALE_FACTOR;
-
+	    localData[threadIdx.x].virialp1*=-ENERGY_SCALE_FACTOR;
+            localData[threadIdx.x].virialp2*=-ENERGY_SCALE_FACTOR;
+            localData[threadIdx.x].virialp3*=-ENERGY_SCALE_FACTOR;
             // Write results.
 
             unsigned int offset = x*TILE_SIZE + tgx;
@@ -645,6 +712,16 @@ extern "C" __global__ void computeElectrostatics(
             atomicAdd(&torqueBuffers[offset], static_cast<unsigned long long>((long long) (data.torque.x*0x100000000)));
             atomicAdd(&torqueBuffers[offset+PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long) (data.torque.y*0x100000000)));
             atomicAdd(&torqueBuffers[offset+2*PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long) (data.torque.z*0x100000000)));
+		virialp1.x+=data.virialp1.x;
+	    virialp1.y+=data.virialp1.y;
+	    virialp1.z+=data.virialp1.z;
+	    virialp2.x+=data.virialp2.x;
+	    virialp2.y+=data.virialp2.y;
+	    virialp2.z+=data.virialp2.z;
+	    virialp3.x+=data.virialp3.x;
+	    virialp3.y+=data.virialp3.y;
+	    virialp3.z+=data.virialp3.z;    
+
 #ifdef USE_CUTOFF
             offset = atomIndices[threadIdx.x];
 #else
@@ -659,5 +736,14 @@ extern "C" __global__ void computeElectrostatics(
         }
         pos++;
     }
+    atomicAdd(&virial[0],virialp1.x);	
+	atomicAdd(&virial[1],virialp1.y);
+	atomicAdd(&virial[2],virialp1.z);	
+	atomicAdd(&virial[3],virialp2.x);
+	atomicAdd(&virial[4],virialp2.y);
+	atomicAdd(&virial[5],virialp2.z);
+	atomicAdd(&virial[6],virialp3.x);
+	atomicAdd(&virial[7],virialp3.y);            
+	atomicAdd(&virial[8],virialp3.z);
     energyBuffer[blockIdx.x*blockDim.x+threadIdx.x] += energy*ENERGY_SCALE_FACTOR;
 }

@@ -305,6 +305,7 @@ void CudaNonbondedUtilities::initialize(const System& system) {
 
     forceArgs.push_back(&context.getForce().getDevicePointer());
     forceArgs.push_back(&context.getEnergyBuffer().getDevicePointer());
+    forceArgs.push_back(&context.getSlowVirialPointer()->getDevicePointer());
     forceArgs.push_back(&context.getPosq().getDevicePointer());
     forceArgs.push_back(&exclusions->getDevicePointer());
     forceArgs.push_back(&exclusionTiles->getDevicePointer());
@@ -452,10 +453,10 @@ bool CudaNonbondedUtilities::updateNeighborListSize() {
         interactingTiles = CudaArray::create<int>(context, maxTiles, "interactingTiles");
         interactingAtoms = CudaArray::create<int>(context, CudaContext::TileSize*maxTiles, "interactingAtoms");
         if (forceArgs.size() > 0)
-            forceArgs[7] = &interactingTiles->getDevicePointer();
+            forceArgs[8] = &interactingTiles->getDevicePointer();
         findInteractingBlocksArgs[6] = &interactingTiles->getDevicePointer();
         if (forceArgs.size() > 0)
-            forceArgs[17] = &interactingAtoms->getDevicePointer();
+            forceArgs[18] = &interactingAtoms->getDevicePointer();
         findInteractingBlocksArgs[7] = &interactingAtoms->getDevicePointer();
     }
     if (pinnedCountBuffer[1] > maxSinglePairs) {
@@ -464,7 +465,7 @@ bool CudaNonbondedUtilities::updateNeighborListSize() {
         singlePairs = NULL; // Avoid an error in the destructor if the following allocation fails
         singlePairs = CudaArray::create<int2>(context, maxSinglePairs, "singlePairs");
         if (forceArgs.size() > 0)
-            forceArgs[19] = &singlePairs->getDevicePointer();
+            forceArgs[20] = &singlePairs->getDevicePointer();
         findInteractingBlocksArgs[8] = &singlePairs->getDevicePointer();
     }
     forceRebuildNeighborList = true;

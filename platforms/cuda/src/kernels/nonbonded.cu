@@ -100,7 +100,7 @@ static __inline__ __device__ long long real_shfl(long long var, int srcLane) {
  *
  */
 extern "C" __global__ void computeNonbonded(
-        unsigned long long* __restrict__ forceBuffers, mixed* __restrict__ energyBuffer, const real4* __restrict__ posq, const tileflags* __restrict__ exclusions,
+        unsigned long long* __restrict__ forceBuffers, mixed* __restrict__ energyBuffer, float* __restrict__ virial, const real4* __restrict__ posq, const tileflags* __restrict__ exclusions,
         const ushort2* __restrict__ exclusionTiles, unsigned int startTileIndex, unsigned int numTileIndices
 #ifdef USE_CUTOFF
         , const int* __restrict__ tiles, const unsigned int* __restrict__ interactionCount, real4 periodicBoxSize, real4 invPeriodicBoxSize, 
@@ -114,6 +114,12 @@ extern "C" __global__ void computeNonbonded(
     const unsigned int tgx = threadIdx.x & (TILE_SIZE-1); // index within the warp
     const unsigned int tbx = threadIdx.x - tgx;           // block warpIndex
     mixed energy = 0;
+    float vxx= 0.0f;
+    float vxy= 0.0f;
+    float vxz=0.0f;
+    float vyy=0.0f;
+    float vzy=0.0f;
+    float vzz=0.0f;
     INIT_DERIVATIVES
     // used shared memory if the device cannot shuffle
 #ifndef ENABLE_SHUFFLE
@@ -177,9 +183,22 @@ extern "C" __global__ void computeNonbonded(
                 bool isExcluded = (atom1 >= NUM_ATOMS || atom2 >= NUM_ATOMS || !(excl & 0x1));
 #endif
                 real tempEnergy = 0.0f;
-                const real interactionScale = 0.5f;
+               float tempvxx= 0.0f;
+       	       float tempvxy=0.0f;
+       	       float tempvxz=0.0f;
+               float tempvyy=0.0f;
+               float tempvzy=0.0f;
+               float tempvzz=0.0f;
+
+	  	const real interactionScale = 0.5f;
                 COMPUTE_INTERACTION
                 energy += 0.5f*tempEnergy;
+		vxx+= 0.5f*tempvxx;
+		vxy+= 0.5f*tempvxy;
+		vxz+= 0.5f*tempvxz;
+		vyy+= 0.5f*tempvyy;
+		vzy+= 0.5f*tempvzy;
+		vzz+= 0.5f*tempvzz;
 #ifdef INCLUDE_FORCES
 #ifdef USE_SYMMETRIC
                 force.x -= delta.x*dEdR;
@@ -246,9 +265,21 @@ extern "C" __global__ void computeNonbonded(
                 bool isExcluded = (atom1 >= NUM_ATOMS || atom2 >= NUM_ATOMS || !(excl & 0x1));
 #endif
                 real tempEnergy = 0.0f;
+		float tempvxx= 0.0f;
+        	float tempvxy=0.0f;
+        	float tempvxz=0.0f;
+        	float tempvyy=0.0f;
+       		float tempvzy=0.0f;
+        	float tempvzz=0.0f;
                 const real interactionScale = 1.0f;
                 COMPUTE_INTERACTION
                 energy += tempEnergy;
+		vxx+= tempvxx;
+               	vxy+= tempvxy;
+                vxz+= tempvxz;
+               	vyy+= tempvyy;
+               	vzy+= tempvzy;
+                vzz+= tempvzz;
 #ifdef INCLUDE_FORCES
 #ifdef USE_SYMMETRIC
                 delta *= dEdR;
@@ -451,10 +482,23 @@ extern "C" __global__ void computeNonbonded(
 #ifdef USE_EXCLUSIONS
                     bool isExcluded = (atom1 >= NUM_ATOMS || atom2 >= NUM_ATOMS);
 #endif
-                    real tempEnergy = 0.0f;
-                    const real interactionScale = 1.0f;
+
+		    real tempEnergy = 0.0f;
+		float tempvxx= 0.0f;
+       		float tempvxy=0.0f;
+     		float tempvxz=0.0f;
+                float tempvyy=0.0f;
+    		float tempvzy=0.0f;
+                float tempvzz=0.0f;
+		     const real interactionScale = 1.0f;
                     COMPUTE_INTERACTION
                     energy += tempEnergy;
+                    vxx+= tempvxx;
+                    vxy+= tempvxy;
+                    vxz+= tempvxz;
+                    vyy+= tempvyy;
+                    vzy+= tempvzy;
+               	    vzz+= tempvzz;
 #ifdef INCLUDE_FORCES
 #ifdef USE_SYMMETRIC
                     delta *= dEdR;
@@ -523,9 +567,21 @@ extern "C" __global__ void computeNonbonded(
                     bool isExcluded = (atom1 >= NUM_ATOMS || atom2 >= NUM_ATOMS);
 #endif
                     real tempEnergy = 0.0f;
-                    const real interactionScale = 1.0f;
+	       	   float tempvxx= 0.0f;
+       		   float tempvxy=0.0f;
+                   float tempvxz=0.0f;
+                   float tempvyy=0.0f;
+                   float tempvzy=0.0f;
+                   float tempvzz=0.0f;
+		    const real interactionScale = 1.0f;
                     COMPUTE_INTERACTION
                     energy += tempEnergy;
+		    vxx+= tempvxx;
+                    vxy+= tempvxy;
+                    vxz+= tempvxz;
+                    vyy+= tempvyy;
+                    vzy+= tempvzy;
+                    vzz+= tempvzz;
 #ifdef INCLUDE_FORCES
 #ifdef USE_SYMMETRIC
                     delta *= dEdR;
@@ -624,10 +680,22 @@ atom2 = pair.y;
 #endif
         bool hasExclusions = false;
         bool isExcluded = false;
-        real tempEnergy = 0.0f;
+	float tempvxx= 0.0f;
+        float tempvxy=0.0f;
+        float tempvxz=0.0f;
+        float tempvyy=0.0f;
+        float tempvzy=0.0f;
+        float tempvzz=0.0f;
+  	real tempEnergy = 0.0f;
         const real interactionScale = 1.0f;
         COMPUTE_INTERACTION
         energy += tempEnergy;
+	vxx+= tempvxx;
+        vxy+= tempvxy;
+        vxz+= tempvxz;
+        vyy+= tempvyy;
+        vzy+= tempvzy;
+        vzz+= tempvzz;
 #ifdef INCLUDE_FORCES
 #ifdef USE_SYMMETRIC
         real3 dEdR1 = delta*dEdR;
@@ -645,5 +713,14 @@ atom2 = pair.y;
 #ifdef INCLUDE_ENERGY
     energyBuffer[blockIdx.x*blockDim.x+threadIdx.x] += energy;
 #endif
+		atomicAdd(&virial[0],vxx);
+                atomicAdd(&virial[1],vxy);
+                atomicAdd(&virial[2],vxz);
+                atomicAdd(&virial[3],vxy);
+                atomicAdd(&virial[4],vyy);
+                atomicAdd(&virial[5],vzy);
+                atomicAdd(&virial[6],vxz);
+                atomicAdd(&virial[7],vzy);
+                atomicAdd(&virial[8],vzz);
     SAVE_DERIVATIVES
 }

@@ -678,7 +678,7 @@ CUmodule CudaContext::createModule(const string source, const map<string, string
         return module;
     }
     catch (...) {
-        remove(inputFile.c_str());
+       remove(inputFile.c_str());
         remove(outputFile.c_str());
         remove(logFile.c_str());
         throw;

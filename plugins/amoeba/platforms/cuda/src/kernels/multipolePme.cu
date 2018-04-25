@@ -1134,6 +1134,7 @@ extern "C" __global__ void computeFixedMultipoleForceAndEnergy(real4* __restrict
                       + 2*(multipole[5]-multipole[4])*cphi[7]
                       + multipole[7]*cphi[4] + multipole[9]*cphi[8]
                       - multipole[7]*cphi[5] - multipole[8]*cphi[9])*0x100000000);
+#ifdef USES_VIRIAL
 real vxx= -1.0f*multipole[1]*cphi[1]-2.0f*multipole[4]*cphi[4]-multipole[7]*cphi[7]-multipole[8]*cphi[8];
 	real vxy= -0.5f*(multipole[2]*cphi[1]+multipole[1]*cphi[2])-(multipole[4]+multipole[5])*cphi[7]
 	-0.5f*multipole[7]*(cphi[4]+cphi[5])-0.5f*(multipole[8]*cphi[9]+multipole[9]*cphi[8]);
@@ -1152,6 +1153,7 @@ real vxx= -1.0f*multipole[1]*cphi[1]-2.0f*multipole[4]*cphi[4]-multipole[7]*cphi
 	atomicAdd(&virial[6],EPSILON_FACTOR*vxz);
 	atomicAdd(&virial[7],EPSILON_FACTOR*vyz);
 	atomicAdd(&virial[8],EPSILON_FACTOR*vzz);
+#endif
         // Compute the force and energy.
 
         multipole[1] = fracDipole[i*3];
@@ -1263,6 +1265,7 @@ extern "C" __global__ void computeInducedDipoleForceAndEnergy(real4* __restrict_
         inducedDipolePolar[2] = cinducedDipolePolar[0]*fracToCart[0][2] + cinducedDipolePolar[1]*fracToCart[1][2] + cinducedDipolePolar[2]*fracToCart[2][2];
 
 	//virial terms for the reciprocal induced dipole. Note that the cphi array( but not the cphid,cphip or cphim arrays are 2x stronger than in tinker. Therefore, extra  multiplicitive alars of 0.5 are present in each cphi term. 
+#ifdef USES_VIRIAL
 	real vxx=-0.5f*cphi[1]*multipole[1]-0.5f*(cphim.x*(cinducedDipole[0]+cinducedDipolePolar[0])+cphid.x*cinducedDipolePolar[0]+cphip.x*cinducedDipole[0]);
 	vxx += -1.0f*multipole[4]*cphi[4]-0.5f*multipole[7]*cphi[7]-0.5f*multipole[8]*cphi[8];
 	real vxy=  -0.25f*(cphi[1]*multipole[2]+cphi[2]*multipole[1])-0.25f*(cphim.x*(cinducedDipole[1]+cinducedDipolePolar[1])+cphim.y*(cinducedDipole[0]+cinducedDipolePolar[0])+cphid.x*cinducedDipolePolar[1]+cphip.x*cinducedDipole[1]+cphid.y*cinducedDipolePolar[0]+cphip.y*cinducedDipole[0]);
@@ -1275,6 +1278,7 @@ extern "C" __global__ void computeInducedDipoleForceAndEnergy(real4* __restrict_
 	vyz+= -0.5f*((multipole[5]+multipole[6])*cphi[9])-0.25f*(multipole[9]*(cphi[5]+cphi[6])+multipole[7]*cphi[8]+multipole[8]*cphi[7]);
 	real vzz= -0.5f*cphi[3]*multipole[3]-0.5f*(cphim.z*(cinducedDipole[2]+cinducedDipolePolar[2])+cphid.z*cinducedDipolePolar[2]+cphip.z*cinducedDipole[2]);
 	vzz+= -1.0f*multipole[6]*cphi[6]-0.5f*multipole[8]*cphi[8]-0.5f*multipole[9]*cphi[9];
+#endif
         atomicAdd(&virial[0],EPSILON_FACTOR*vxx);  	 
 	atomicAdd(&virial[1],EPSILON_FACTOR*vxy);
 	atomicAdd(&virial[2],EPSILON_FACTOR*vxz);

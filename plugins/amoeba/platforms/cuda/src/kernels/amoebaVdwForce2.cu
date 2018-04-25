@@ -58,6 +58,7 @@ if (r > TAPER_CUTOFF) {
 }
 #endif
 real dE=includeInteraction ? deltaE * invR : 0;
+#if USES_VIRIAL
 real3 ab = make_real3(posq2.x-posq1.x,posq2.y-posq1.y, posq2.z -posq1.z);
 #if APPLY_PERIODIC
 APPLY_PERIODIC_TO_DELTA(ab);
@@ -71,13 +72,13 @@ float virialZX = ab.z * dEdx;
 float virialYY = ab.y * dEdy;
 float virialZY = ab.z * dEdy;
 float virialZZ = ab.z * dEdz;
-
-tempEnergy += (includeInteraction ? termEnergy : 0);
 tempvxx= (includeInteraction? virialXX: 0);
 tempvxy=(includeInteraction? virialYX: 0);
 tempvxz=(includeInteraction? virialZX: 0);
 tempvyy=(includeInteraction? virialYY: 0);
 tempvzy=(includeInteraction? virialZY: 0);
 tempvzz=(includeInteraction? virialZZ: 0);
+#endif 
+tempEnergy += (includeInteraction ? termEnergy : 0);
 dEdR -= (includeInteraction ? deltaE * invR : 0);
 }

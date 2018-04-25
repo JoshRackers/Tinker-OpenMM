@@ -408,7 +408,7 @@ private:
     int fixedFieldThreads, inducedFieldThreads, electrostaticsThreads;
     int gridSizeX, gridSizeY, gridSizeZ;
     double alpha, inducedEpsilon;
-    bool usePME, hasQuadrupoles, hasInitializedScaleFactors, hasInitializedFFT, multipolesAreValid, hasCreatedEvent;
+    bool usePME, hasQuadrupoles, hasInitializedScaleFactors, hasInitializedFFT, multipolesAreValid, hasCreatedEvent, UsesVirial;
     AmoebaMultipoleForce::PolarizationType polarizationType;
     CudaContext& cu;
     const System& system;

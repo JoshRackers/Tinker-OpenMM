@@ -7531,15 +7531,11 @@ void CudaIntegrateCustomStepKernel::scaleBox(ContextImpl& context,CustomIntegrat
     cu.ResetFastVirial();
     cu.ResetSlowVirial();	
     double innersteps= integrator.getGlobalVariableByName("NinnerSteps");
-    printf("xvirial%g\n",fastvirial[0]/innersteps+slowvirial[0]);
-    printf("yvirial%g\n",fastvirial[4]/innersteps+slowvirial[4]); 
-    printf("zvirial%g\n",fastvirial[8]/innersteps+slowvirial[8]); 
     double PressureConstant= 16.39; //kcal/mol/(cubic nm)
     double factor= PressureConstant/volume;
     bool forcesValid=true;
     double actualPressure = factor*(-1.0*(fastvirial[0]/innersteps+slowvirial[0])-(fastvirial[4]/innersteps+slowvirial[4])-(fastvirial[8]/innersteps+slowvirial[8])+2.0*Kinetic)/3.0;
     float lengthScale=pow((1.0+0.003*0.000046/2.0*(actualPressure-1.0)),1.0/3.0);
-printf("actual pressure  %g\n",lengthScale);
     	scaleCoordinates(context, lengthScale, lengthScale, lengthScale);
     	context.getOwner().setPeriodicBoxVectors(box[0]*lengthScale, box[1]*lengthScale, box[2]*lengthScale);
 }void CudaIntegrateCustomStepKernel::scaleCoordinates(ContextImpl& context, double scaleX, double scaleY, double scaleZ) {

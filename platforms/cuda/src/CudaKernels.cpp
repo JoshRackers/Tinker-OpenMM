@@ -7371,7 +7371,6 @@ void CudaIntegrateCustomStepKernel::execute(ContextImpl& context, CustomIntegrat
     CudaIntegrationUtilities& integration = cu.getIntegrationUtilities();
     int numAtoms = cu.getNumAtoms();
     int numSteps = integrator.getNumComputations();
-
     // Loop over computation steps in the integrator and execute them.
 
     int maxUniformRandoms = uniformRandoms->getSize();
@@ -7503,7 +7502,11 @@ void CudaIntegrateCustomStepKernel::execute(ContextImpl& context, CustomIntegrat
         }else if (stepType[step]== CustomIntegrator::SaveVelocity){
 	        bool forcesValid=true;
 		Kinetic=computeKineticEnergy(context, integrator, forcesValid);
-	}
+	}else if (stepType[step]== CustomIntegrator::ResetSlowVirial){
+		cu.ResetSlowVirial();
+	}else if (stepType[step]== CustomIntegrator::ResetFastVirial){
+                cu.ResetFastVirial();
+        }
         if (invalidatesForces[step])
             forcesAreValid = false;
         step = nextStep;
@@ -7528,8 +7531,8 @@ void CudaIntegrateCustomStepKernel::scaleBox(ContextImpl& context,CustomIntegrat
     fastvirial=cu.getFastVirial();
     vector<float> slowvirial(9);
     slowvirial=cu.getSlowVirial();
+    cu.ResetSlowVirial();
     cu.ResetFastVirial();
-    cu.ResetSlowVirial();	
     double innersteps= integrator.getGlobalVariableByName("NinnerSteps");
     double compress= integrator.getGlobalVariableByName("compress");
     double taupres= integrator.getGlobalVariableByName("taupres");	
@@ -7538,8 +7541,10 @@ void CudaIntegrateCustomStepKernel::scaleBox(ContextImpl& context,CustomIntegrat
     bool forcesValid=true;
     double actualPressure = factor*(-1.0*(fastvirial[0]/innersteps+slowvirial[0])-(fastvirial[4]/innersteps+slowvirial[4])-(fastvirial[8]/innersteps+slowvirial[8])+2.0*Kinetic)/3.0;
     float lengthScale=pow((1.0+integrator.getStepSize()*compress/taupres*(actualPressure-1.0)),1.0/3.0);
-    	scaleCoordinates(context, lengthScale, lengthScale, lengthScale);
-    	context.getOwner().setPeriodicBoxVectors(box[0]*lengthScale, box[1]*lengthScale, box[2]*lengthScale);
+    if (cu.getTime()>integrator.getStepSize()){
+	    scaleCoordinates(context, lengthScale, lengthScale, lengthScale);
+	    context.getOwner().setPeriodicBoxVectors(box[0]*lengthScale, box[1]*lengthScale, box[2]*lengthScale);
+    }
 }void CudaIntegrateCustomStepKernel::scaleCoordinates(ContextImpl& context, double scaleX, double scaleY, double scaleZ) {
     cu.setAsCurrent();
     if (!hasInitializedKernels2) {

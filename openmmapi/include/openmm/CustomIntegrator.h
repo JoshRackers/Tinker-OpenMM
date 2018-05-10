@@ -286,7 +286,9 @@ public:
          */
         BlockEnd = 8,
 	ScaleBox=9,
-	SaveVelocity=10
+	SaveVelocity=10,
+	ResetSlowVirial=11,
+	ResetFastVirial=12
     };
     /**
      * Create a CustomIntegrator.
@@ -457,6 +459,8 @@ public:
     int addUpdateContextState();
     int addScaleBox();
     int addSaveVelocities();
+    int addResetSlowVirial();
+    int addResetFastVirial();
     /**
      * Add a step which begins a new "if" block.
      *

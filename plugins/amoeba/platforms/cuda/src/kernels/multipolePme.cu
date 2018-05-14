@@ -1278,7 +1278,6 @@ extern "C" __global__ void computeInducedDipoleForceAndEnergy(real4* __restrict_
 	vyz+= -0.5f*((multipole[5]+multipole[6])*cphi[9])-0.25f*(multipole[9]*(cphi[5]+cphi[6])+multipole[7]*cphi[8]+multipole[8]*cphi[7]);
 	real vzz= -0.5f*cphi[3]*multipole[3]-0.5f*(cphim.z*(cinducedDipole[2]+cinducedDipolePolar[2])+cphid.z*cinducedDipolePolar[2]+cphip.z*cinducedDipole[2]);
 	vzz+= -1.0f*multipole[6]*cphi[6]-0.5f*multipole[8]*cphi[8]-0.5f*multipole[9]*cphi[9];
-#endif
         atomicAdd(&virial[0],EPSILON_FACTOR*vxx);  	 
 	atomicAdd(&virial[1],EPSILON_FACTOR*vxy);
 	atomicAdd(&virial[2],EPSILON_FACTOR*vxz);
@@ -1288,6 +1287,8 @@ extern "C" __global__ void computeInducedDipoleForceAndEnergy(real4* __restrict_
 	atomicAdd(&virial[6],EPSILON_FACTOR*vxz);
 	atomicAdd(&virial[7],EPSILON_FACTOR*vyz);
 	atomicAdd(&virial[8],EPSILON_FACTOR*vzz);
+#endif
+
         // Compute the force and energy.
 
         multipole[1] = fracDipole[i*3];

@@ -58,7 +58,7 @@ __device__ float computePScaleFactor(uint2 covalent, unsigned int polarizationGr
 __device__ void computeOneInteraction(AtomData& atom1, AtomData& atom2, bool hasExclusions, float dScale, float pScale, float mScale, float forceFactor,
                                       mixed& energy, real4 periodicBoxSize, real4 invPeriodicBoxSize, real4 periodicBoxVecX, real4 periodicBoxVecY, real4 periodicBoxVecZ) {
     // Compute the displacement.
-    
+
     real3 delta;
     delta.x = atom2.pos.x - atom1.pos.x;
     delta.y = atom2.pos.y - atom1.pos.y;
@@ -76,7 +76,7 @@ __device__ void computeOneInteraction(AtomData& atom1, AtomData& atom2, bool has
     real qiRotationMatrix[3][3];
     buildQIRotationMatrix(delta, rInv, qiRotationMatrix);
 
-    
+
     real3 qiUindI = 0.5f*make_real3(qiRotationMatrix[0][1]*atom1.inducedDipole.x + qiRotationMatrix[0][2]*atom1.inducedDipole.y + qiRotationMatrix[0][0]*atom1.inducedDipole.z,
                                     qiRotationMatrix[1][1]*atom1.inducedDipole.x + qiRotationMatrix[1][2]*atom1.inducedDipole.y + qiRotationMatrix[1][0]*atom1.inducedDipole.z,
                                     qiRotationMatrix[2][1]*atom1.inducedDipole.x + qiRotationMatrix[2][2]*atom1.inducedDipole.y + qiRotationMatrix[2][0]*atom1.inducedDipole.z);
@@ -89,15 +89,15 @@ __device__ void computeOneInteraction(AtomData& atom1, AtomData& atom2, bool has
     real3 qiUinpJ = 0.5f*make_real3(qiRotationMatrix[0][1]*atom2.inducedDipolePolar.x + qiRotationMatrix[0][2]*atom2.inducedDipolePolar.y + qiRotationMatrix[0][0]*atom2.inducedDipolePolar.z,
                                     qiRotationMatrix[1][1]*atom2.inducedDipolePolar.x + qiRotationMatrix[1][2]*atom2.inducedDipolePolar.y + qiRotationMatrix[1][0]*atom2.inducedDipolePolar.z,
                                     qiRotationMatrix[2][1]*atom2.inducedDipolePolar.x + qiRotationMatrix[2][2]*atom2.inducedDipolePolar.y + qiRotationMatrix[2][0]*atom2.inducedDipolePolar.z);
-    
+
     real3 rotatedDipole1 = rotateDipole(atom1.sphericalDipole, qiRotationMatrix);
     real3 rotatedDipole2 = rotateDipole(atom2.sphericalDipole, qiRotationMatrix);
     real rotatedQuadrupole1[] = {0, 0, 0, 0, 0};
     real rotatedQuadrupole2[] = {0, 0, 0, 0, 0};
 #ifdef INCLUDE_QUADRUPOLES
     rotateQuadupoles(qiRotationMatrix, atom1.sphericalQuadrupole, atom2.sphericalQuadrupole, rotatedQuadrupole1, rotatedQuadrupole2);
-#endif    
-    
+#endif
+
     // The field derivatives at I due to permanent and induced moments on J, and vice-versa.
     // Also, their derivatives w.r.t. R, which are needed for force calculations
     real Vij[9], Vji[9], VjiR[9], VijR[9];
@@ -457,7 +457,7 @@ extern "C" __global__ void computeElectrostatics(
     __shared__ AtomData localData[THREAD_BLOCK_SIZE];
 
     // First loop: process tiles that contain exclusions.
-    
+
     const unsigned int firstExclusionTile = FIRST_EXCLUSION_TILE+warp*(LAST_EXCLUSION_TILE-FIRST_EXCLUSION_TILE)/totalWarps;
     const unsigned int lastExclusionTile = FIRST_EXCLUSION_TILE+(warp+1)*(LAST_EXCLUSION_TILE-FIRST_EXCLUSION_TILE)/totalWarps;
     for (int pos = firstExclusionTile; pos < lastExclusionTile; pos++) {
@@ -569,12 +569,12 @@ extern "C" __global__ void computeElectrostatics(
     __shared__ int atomIndices[THREAD_BLOCK_SIZE];
     __shared__ volatile int skipTiles[THREAD_BLOCK_SIZE];
     skipTiles[threadIdx.x] = -1;
-    
+
     while (pos < end) {
         bool includeTile = true;
 
         // Extract the coordinates of this tile.
-        
+
         int x, y;
 #ifdef USE_CUTOFF
         x = tiles[pos];
@@ -595,7 +595,7 @@ extern "C" __global__ void computeElectrostatics(
             }
             else
                 skipTiles[threadIdx.x] = end;
-            skipBase += TILE_SIZE;            
+            skipBase += TILE_SIZE;
             currentSkipIndex = tbx;
         }
         while (skipTiles[currentSkipIndex] < pos)

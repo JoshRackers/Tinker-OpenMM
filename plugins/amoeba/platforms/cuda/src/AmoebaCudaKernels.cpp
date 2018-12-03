@@ -3102,3 +3102,6 @@ void CudaCalcAmoebaAngleTorsionForceKernel::copyParametersToContext(ContextImpl&
 	cu.invalidateMolecules();
 
 }
+
+#include "HippoChargeTransferKernel.cc"
+#include "HippoCPMultipoleRepulsionKernel.cc"

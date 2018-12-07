@@ -678,6 +678,8 @@ private:
 	CudaArray* params3;
 };
 
+#include "HippoChargeTransferKernel.h"
+
 } // namespace OpenMM
 
 #endif /*AMOEBA_OPENMM_CUDAKERNELS_H*/

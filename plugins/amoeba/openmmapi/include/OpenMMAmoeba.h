@@ -45,5 +45,6 @@
 #include "openmm/AmoebaWcaDispersionForce.h"
 #include "openmm/AmoebaStretchTorsionForce.h"
 #include "openmm/AmoebaAngleTorsionForce.h"
+#include "openmm/HippoChargeTransferForce.h"
 
 #endif /*AMOEBA_OPENMM_H_*/

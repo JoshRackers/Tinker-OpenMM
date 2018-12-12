@@ -50,7 +50,7 @@ public:
       ctalpha.push_back(alpha);
       ctcharge.push_back(charge);
 
-      std::vector<std::vector<int>> newlist;
+      std::vector<std::vector<int> > newlist;
       newlist.resize(CovalentEnd);
       covalentMaps.push_back(newlist);
       return ctalpha.size() - 1;
@@ -140,6 +140,36 @@ public:
       multipoles[index].multipoleAtomX = multipoleAtomX;
       multipoles[index].multipoleAtomY = multipoleAtomY;
    }
+
+   bool getUsePME() const { return usePME; }
+
+   void setUsePME(bool ifUsePME) { usePME = ifUsePME; }
+
+   double getPMECutoffDistance() const { return pmeCutoffDistance; }
+
+   void setPMECutoffDistance(double distance) { pmeCutoffDistance = distance; }
+
+   void getPMEParameters(double& alpha, int& nx, int& ny, int& nz) const {
+      alpha = ewaldAlpha;
+      nx    = pmenx;
+      ny    = pmeny;
+      nz    = pmenz;
+   }
+
+   void setPMEParameters(double alpha, int nx, int ny, int nz) {
+      ewaldAlpha = alpha;
+      pmenx      = nx;
+      pmeny      = ny;
+      pmenz      = nz;
+   }
+
+   double getEwaldErrorTolerance() const { return ewaldErrorTolerance; }
+
+   void setEwaldErrorTolerance(double tol) { ewaldErrorTolerance = tol; }
+
+   int getPMEOrder() const { return pmeorder; }
+
+   void setPMEOrder(int order) { pmeorder = order; }
 
    // repulsion
    double getRepelTaperDistance() const { return repelTaperDistance; }
@@ -231,9 +261,9 @@ protected:
    public:
       int    axisType, multipoleAtomZ, multipoleAtomX, multipoleAtomY;
       double charge;
-      std::vector<double>           molecularDipole;
-      std::vector<double>           molecularQuadrupole;
-      std::vector<std::vector<int>> covalentInfo;
+      std::vector<double>            molecularDipole;
+      std::vector<double>            molecularQuadrupole;
+      std::vector<std::vector<int> > covalentInfo;
 
       MultipoleInfo() {
          axisType = multipoleAtomZ = multipoleAtomX = multipoleAtomY = -1;
@@ -270,6 +300,9 @@ protected:
       }
    };
    std::vector<MultipoleInfo> multipoles;
+   bool                       usePME;
+   double pmeCutoffDistance, ewaldAlpha, ewaldErrorTolerance;
+   int    pmeorder, pmenx, pmeny, pmenz;
 
    // charge transfer
    double              ctTaperDistance, ctCutoffDistance;
@@ -284,7 +317,7 @@ protected:
    double              multipoleCutoffDistance;
    std::vector<double> pcore, pval, palpha;
 
-   std::vector<std::vector<std::vector<int>>> covalentMaps;
+   std::vector<std::vector<std::vector<int> > > covalentMaps;
 };
 
 } // namespace OpenMM

@@ -1332,12 +1332,12 @@ void CudaCalcAmoebaMultipoleForceKernel::initialize(const System& system, const 
 
             double eps = 1.0e-7;
             if (moduli[0] < eps)
-                moduli[0] = 0.9*moduli[1];
+                moduli[0] = 0.5*moduli[1];
             for (int i = 1; i < ndata-1; i++)
                 if (moduli[i] < eps)
-                    moduli[i] = 0.9*(moduli[i-1]+moduli[i+1]);
+                    moduli[i] = 0.5*(moduli[i-1]+moduli[i+1]);
             if (moduli[ndata-1] < eps)
-                moduli[ndata-1] = 0.9*moduli[ndata-2];
+                moduli[ndata-1] = 0.5*moduli[ndata-2];
 
             // Compute and apply the optimal zeta coefficient.
 
@@ -1580,24 +1580,193 @@ double CudaCalcAmoebaMultipoleForceKernel::execute(ContextImpl& context, bool in
         void* finishSpreadArgs[] = {&pmeGrid->getDevicePointer()};
         if (cu.getUseDoublePrecision())
             cu.executeKernel(pmeFinishSpreadChargeKernel, finishSpreadArgs, pmeGrid->getSize());
+//////////////////
+#define ZW_DEBUG__ 0
+static const char* fmt_999 = "%20s%12.6lf%12.6lf%12.6lf%8d\n";
+static const char* fmt_993 = "%20s%12.6lf%12.6lf%12.6lf\n";
+static const char* fmt_991 = "%20s%18.4E%8d\n";
+bool useDoublePrecision = cu.getUseDoublePrecision();
+int numAtoms = cu.getNumAtoms();
+int paddedNumAtoms = cu.getPaddedNumAtoms();
+
+#if ZW_DEBUG__ || 1
+{
+   printf(" after grid_mpole\n");
+   vector<long long> fv(2*pmeGrid->getSize());
+   pmeGrid->download(fv.data());
+   int ntot = gridSizeX * gridSizeX * gridSizeX;
+   for (int i = 0; i < ntot; i += 3) {
+      if (useDoublePrecision) {
+         double2* f = (double2*) fv.data();
+         printf(fmt_999, "qgrid.x", f[i].x, f[i + 1].x, f[i + 2].x, i + 1);
+      } else {
+         float2* f = (float2*) fv.data();
+         printf(fmt_999, "qgrid.x", f[i].x, f[i + 1].x, f[i + 2].x, i + 1);
+      }
+   }
+}
+#endif
+//////////////////
         if (cu.getUseDoublePrecision())
             cufftExecZ2Z(fft, (double2*) pmeGrid->getDevicePointer(), (double2*) pmeGrid->getDevicePointer(), CUFFT_FORWARD);
         else
             cufftExecC2C(fft, (float2*) pmeGrid->getDevicePointer(), (float2*) pmeGrid->getDevicePointer(), CUFFT_FORWARD);
+#if ZW_DEBUG__ || 1
+{
+   printf(" after fftfront\n");
+   vector<double2> fv(pmeGrid->getSize());
+   pmeGrid->download(fv.data());
+   int ntot = gridSizeX * gridSizeX * gridSizeX;
+   for (int i = 0; i < ntot; i += 3) {
+      if (useDoublePrecision) {
+         double2* f = fv.data();
+         printf(fmt_999, "fftf grid.x", f[i].x, f[i + 1].x, f[i + 2].x, i + 1);
+         printf(fmt_999, "fftf grid.y", f[i].y, f[i + 1].y, f[i + 2].y, i + 1);
+      } else {
+         float2* f = (float2*)fv.data();
+         printf(fmt_999, "fftf grid.x", f[i].x, f[i + 1].x, f[i + 2].x, i + 1);
+         printf(fmt_999, "fftf grid.y", f[i].y, f[i + 1].y, f[i + 2].y, i + 1);
+      }  
+   }
+}
+#endif
+#if ZW_DEBUG__ || 1
+{
+   vector<double> bv;
+
+   bv.reserve(pmeBsplineModuliX->getSize());
+   pmeBsplineModuliX->download(bv);
+   for (int i = 0; i < pmeBsplineModuliX->getSize(); ++i) {
+      if (useDoublePrecision) {
+         double* f = bv.data();
+         printf(fmt_991, "bsmod1", f[i], i + 1);
+      } else {
+         float* f = (float*) bv.data();
+         printf(fmt_991, "bsmod1", f[i], i + 1);
+      }
+   }
+
+   bv.reserve(pmeBsplineModuliY->getSize());
+   pmeBsplineModuliY->download(bv);
+   for (int i = 0; i < pmeBsplineModuliY->getSize(); ++i) {
+      if (useDoublePrecision) {
+         double* f = bv.data();
+         printf(fmt_991, "bsmod2", f[i], i + 1);
+      } else {
+         float* f = (float*) bv.data();
+         printf(fmt_991, "bsmod2", f[i], i + 1);
+      }
+   }
+
+   bv.reserve(pmeBsplineModuliZ->getSize());
+   pmeBsplineModuliZ->download(bv);
+   for (int i = 0; i < pmeBsplineModuliZ->getSize(); ++i) {
+      if (useDoublePrecision) {
+         double* f = bv.data();
+         printf(fmt_991, "bsmod3", f[i], i + 1);
+      } else {
+         float* f = (float*) bv.data();
+         printf(fmt_991, "bsmod3", f[i], i + 1);
+      }
+   }
+}
+#endif
         void* pmeConvolutionArgs[] = {&pmeGrid->getDevicePointer(), &pmeBsplineModuliX->getDevicePointer(), &pmeBsplineModuliY->getDevicePointer(),
             &pmeBsplineModuliZ->getDevicePointer(), cu.getPeriodicBoxSizePointer(), recipBoxVectorPointer[0], recipBoxVectorPointer[1], recipBoxVectorPointer[2]};
-        cu.executeKernel(pmeConvolutionKernel, pmeConvolutionArgs, gridSizeX*gridSizeY*gridSizeZ, 256);
+        cu.executeKernel(pmeConvolutionKernel, pmeConvolutionArgs, gridSizeX*gridSizeX*gridSizeX, 256);
+#if ZW_DEBUG__ || 1
+{  
+    printf(" after pme convolution\n");
+   vector<double2> fv(pmeGrid->getSize());
+   pmeGrid->download(fv.data());
+   int ntot = gridSizeX * gridSizeX * gridSizeX;
+   for (int i = 0; i < ntot; i += 3) {
+      if (useDoublePrecision) {
+         double2* f = fv.data();
+         printf(fmt_999, "conv grid.x", f[i].x, f[i + 1].x, f[i + 2].x, i + 1);
+         printf(fmt_999, "conv grid.y", f[i].y, f[i + 1].y, f[i + 2].y, i + 1);
+      } else {
+         float2* f = (float2*)fv.data();
+         printf(fmt_999, "conv grid.x", f[i].x, f[i + 1].x, f[i + 2].x, i + 1);
+         printf(fmt_999, "conv grid.y", f[i].y, f[i + 1].y, f[i + 2].y, i + 1);
+      }  
+   }
+}
+#endif
         if (cu.getUseDoublePrecision())
             cufftExecZ2Z(fft, (double2*) pmeGrid->getDevicePointer(), (double2*) pmeGrid->getDevicePointer(), CUFFT_INVERSE);
         else
             cufftExecC2C(fft, (float2*) pmeGrid->getDevicePointer(), (float2*) pmeGrid->getDevicePointer(), CUFFT_INVERSE);
+#if ZW_DEBUG__ || 1
+{  
+   printf(" after fftback\n");
+   vector<double2> fv(pmeGrid->getSize());
+   pmeGrid->download(fv.data());
+   int ntot = gridSizeX * gridSizeX * gridSizeX;
+   for (int i = 0; i < ntot; i += 3) {
+      if (useDoublePrecision) {
+         double2* f = fv.data();
+         printf(fmt_999, "fftb grid.x", f[i].x, f[i + 1].x, f[i + 2].x, i + 1);
+         printf(fmt_999, "fftb grid.y", f[i].y, f[i + 1].y, f[i + 2].y, i + 1);
+      } else {
+         float2* f = (float2*)fv.data();
+         printf(fmt_999, "fftb grid.x", f[i].x, f[i + 1].x, f[i + 2].x, i + 1);
+         printf(fmt_999, "fftb grid.y", f[i].y, f[i + 1].y, f[i + 2].y, i + 1);
+      }  
+   }
+}
+#endif
         void* pmeFixedPotentialArgs[] = {&pmeGrid->getDevicePointer(), &pmePhi->getDevicePointer(), &field->getDevicePointer(),
             &fieldPolar ->getDevicePointer(), &cu.getPosq().getDevicePointer(), &labFrameDipoles->getDevicePointer(),
             cu.getPeriodicBoxVecXPointer(), cu.getPeriodicBoxVecYPointer(), cu.getPeriodicBoxVecZPointer(),
             recipBoxVectorPointer[0], recipBoxVectorPointer[1], recipBoxVectorPointer[2]};
         cu.executeKernel(pmeFixedPotentialKernel, pmeFixedPotentialArgs, cu.getNumAtoms());
+#if ZW_DEBUG__ || 1
+    {
+        printf(" after fphi_mpole\n");
+        vector<double> fphiv(pmePhi->getSize());
+        pmePhi->download(fphiv);
+        for (int i = 0; i < numAtoms; ++i) {
+            int pos[] = {i+numAtoms, i+2*numAtoms, i+3*numAtoms};
+            if (useDoublePrecision) {
+                double* f = fphiv.data();
+                printf(fmt_999, "fphi_234", f[pos[0]], f[pos[1]], f[pos[2]], i+1);
+            } else {
+                float* f = (float*) fphiv.data();
+                printf(fmt_999, "fphi_234", f[pos[0]], f[pos[1]], f[pos[2]], i+1);
+            }
+        }
+        vector<long long> pdv(3 * cu.getPaddedNumAtoms());
+        field->download(pdv);
+        for (int i = 0; i < cu.getNumAtoms(); ++i) {
+            long long* pd = pdv.data();
+            int pos[] = {i, i+cu.getPaddedNumAtoms(), i+2*cu.getPaddedNumAtoms()};
+            double scal = 1.0 / 0x100000000;
+            scal /= 100;
+            printf(" field  %6d xyz %14.6lf%14.6lf%14.6lf\n", i + 1,
+               scal * pd[pos[0]], scal * pd[pos[1]], scal * pd[pos[2]]);
+        }
+    }
+#endif
         void* pmeTransformFixedPotentialArgs[] = {&pmePhi->getDevicePointer(), &pmeCphi->getDevicePointer(), recipBoxVectorPointer[0], recipBoxVectorPointer[1], recipBoxVectorPointer[2]};
         cu.executeKernel(pmeTransformPotentialKernel, pmeTransformFixedPotentialArgs, cu.getNumAtoms());
+#if ZW_DEBUG__ || 1
+        {
+            printf(" after fphi_to_cphi\n");
+            vector<double> fv(pmeCphi->getSize());
+            pmeCphi->download(fv.data());
+            for (int i = 0; i < numAtoms; ++i) {
+                int pos[] = {10*i+1, 10*i+2, 10*i+3};
+                if (useDoublePrecision) {
+         double* f = fv.data();
+         printf(fmt_999, "cphi", f[pos[0]], f[pos[1]], f[pos[2]], i+1);
+      } else {
+         float* f = (float*) fv.data();
+         printf(fmt_999, "cphi", f[pos[0]], f[pos[1]], f[pos[2]], i+1);
+      }
+            }
+        }
+#endif
         void* pmeFixedForceArgs[] = {&cu.getPosq().getDevicePointer(), &cu.getForce().getDevicePointer(), &torque->getDevicePointer(),
             &cu.getEnergyBuffer().getDevicePointer(), &labFrameDipoles->getDevicePointer(), &labFrameQuadrupoles->getDevicePointer(),
             &fracDipoles->getDevicePointer(), &fracQuadrupoles->getDevicePointer(), &pmePhi->getDevicePointer(), &pmeCphi->getDevicePointer(),
@@ -1616,6 +1785,21 @@ double CudaCalcAmoebaMultipoleForceKernel::execute(ContextImpl& context, bool in
         void* recordInducedDipolesArgs[] = {&field->getDevicePointer(), &fieldPolar->getDevicePointer(),
             &inducedDipole->getDevicePointer(), &inducedDipolePolar->getDevicePointer(), &polarizability->getDevicePointer()};
         cu.executeKernel(recordInducedDipolesKernel, recordInducedDipolesArgs, cu.getNumAtoms());
+
+#if ZW_DEBUG__ || 1
+        {
+            printf(" after total field\n");
+            vector<long long> pdv(3 * cu.getPaddedNumAtoms());
+            field->download(pdv);
+            for (int i = 0; i < cu.getNumAtoms(); ++i) {
+                long long* pd = pdv.data();
+                int pos[] = {i, i+paddedNumAtoms, i+2*paddedNumAtoms};
+                double scal = 1.0 / 0x100000000;
+                scal /= 100;
+                printf(fmt_999, "field", scal * pd[pos[0]], scal * pd[pos[1]], scal * pd[pos[2]], i+1);
+            }
+        }
+#endif
 
         // Reciprocal space calculation for the induced dipoles.
 

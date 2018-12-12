@@ -17,16 +17,42 @@ private:
    class ForceInfo;
    void initializeScaleFactors();
 
-   int           energyAndForceThreads;
-   bool          hasInitializedScaleFactors;
+   bool useDoublePrecision;
+   int  numAtoms, paddedNumAtoms;
+   int  energyAndForceThreads;
+   bool hasInitializedScaleFactors;
+   //
    CudaContext&  cu;
    const System& system;
+   // rotpole
+   CUfunction rotpole_kernel;
+   void       rotpole();
    // dipole and quadrupole
    CudaArray axisInfo; // x, y, z, and axis type
-   CudaArray localFrameDipoles;
-   CudaArray localFrameQuadrupoles;
-   CudaArray globalFrameDipoles;
-   CudaArray globalFrameQuadrupoles;
+   CudaArray localFrameDipoles, localFrameQuadrupoles;
+   CudaArray globalFrameDipoles, globalFrameQuadrupoles;
+   CudaArray mpoleField, mpoleFieldP;
+   // PME
+   bool        hasInitializedFFT;
+   cufftHandle fft;
+   double      pmeCutoffDistance, ewaldAlpha, ewaldErrorTolerance;
+   int         pmeorder, nfft1, nfft2, nfft3;
+   void*       recipBoxVectorPointer[3];
+   CudaArray   qgrid, bsmod1, bsmod2, bsmod3;
+   CudaArray   fracDipoles, fracQuadrupoles;
+   CudaArray   fphi, cphi;
+   //
+   CUfunction cmp_to_fmp_kernel, grid_mpole_kernel,
+      grid_convert_to_double_kernel;
+   CUfunction pme_convolution_kernel;
+   CUfunction fphi_mpole_kernel, fphi_to_cphi_kernel;
+   void       cmp_to_fmp();
+   void       grid_mpole();
+   void       fftfront();
+   void       pme_convolution();
+   void       fftback();
+   void       fphi_mpole();
+   void       fphi_to_cphi();
    // charge transfer
    CudaArray chgct, dmpct;
    // replusion
@@ -35,12 +61,9 @@ private:
    CudaArray pcore, pval, palpha;
    // torque
    CudaArray torque;
-   // kernels
+
    std::vector<int3> covalentFlagValues;
    CudaArray         covalentFlags;
 
    CUfunction energyAndForceKernel;
-
-   //
-   CUfunction rotpoleKernel; // Tinker rotpole subroutine
 };

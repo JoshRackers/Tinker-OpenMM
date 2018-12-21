@@ -114,8 +114,11 @@ void CudaCalcHippoChargeTransferForceKernel::initialize(
          cu, 3 * paddedNumAtoms, sizeof(long long), "mpoleField");
       mpoleFieldP.initialize(
          cu, 3 * paddedNumAtoms, sizeof(long long), "mpoleFieldP");
+      torque.initialize(
+      	 cu, 3 * paddedNumAtoms, sizeof(long long), "torque");
       cu.addAutoclearBuffer(mpoleField);
       cu.addAutoclearBuffer(mpoleFieldP);
+      cu.addAutoclearBuffer(torque);
 
       vector<int4>    axisInfoVec(axisInfo.getSize());
       vector<double4> posqVec(posq.getSize());
@@ -218,6 +221,9 @@ void CudaCalcHippoChargeTransferForceKernel::initialize(
          // f19(1), f19(2), f19(3), ..., f19(NATOMS)
          fphi.initialize(cu, 20 * numAtoms, elementSize, "fphi");
          cphi.initialize(cu, 10 * numAtoms, elementSize, "cphi");
+         phid.initialize(cu, 10 * numAtoms, elementSize, "phid");
+         phip.initialize(cu, 10 * numAtoms, elementSize, "phip");
+         phidp.initialize(cu, 20 * numAtoms, elementSize, "phidp");
 
          cufftResult result = cufftPlan3d(&fft, nfft1, nfft2, nfft3,
             useDoublePrecision ? CUFFT_Z2Z : CUFFT_C2C);
@@ -551,6 +557,9 @@ void CudaCalcHippoChargeTransferForceKernel::initialize(
          fphi_to_cphi_kernel    = cu.getKernel(pmemodule, "fphi_to_cphi");
          cuFuncSetCacheConfig(grid_mpole_kernel, CU_FUNC_CACHE_PREFER_L1);
          cuFuncSetCacheConfig(fphi_mpole_kernel, CU_FUNC_CACHE_PREFER_L1);
+
+         recip_mpole_energy_force_torque_kernel = cu.getKernel(pmemodule, "recip_mpole_energy_force_torque");
+         torque_to_force_kernel = cu.getKernel(pmemodule, "torque_to_force");
          // cuFuncSetCacheConfig(pmeSpreadInducedDipolesKernel,
          // CU_FUNC_CACHE_PREFER_L1); grid_uind
          // cuFuncSetCacheConfig(pmeInducedPotentialKernel,
@@ -885,8 +894,8 @@ void CudaCalcHippoChargeTransferForceKernel::fphi_mpole() {
 #endif
 }
 
-void CudaCalcHippoChargeTransferForceKernel::fphi_to_cphi() {
-   void* fphi_to_cphi_args[] = {&fphi.getDevicePointer(),
+void CudaCalcHippoChargeTransferForceKernel::fphi_to_cphi(CudaArray& phiarray) {
+   void* fphi_to_cphi_args[] = {&phiarray.getDevicePointer(),
       &cphi.getDevicePointer(), recipBoxVectorPointer[0],
       recipBoxVectorPointer[1], recipBoxVectorPointer[2]};
    cu.executeKernel(fphi_to_cphi_kernel, fphi_to_cphi_args, numAtoms);
@@ -907,6 +916,23 @@ void CudaCalcHippoChargeTransferForceKernel::fphi_to_cphi() {
       }
    }
 #endif
+}
+
+void CudaCalcHippoChargeTransferForceKernel::recip_mpole_energy_force_torque() {
+	void* recip_mpole_energy_force_torque_args[] = {
+		&cu.getPosq().getDevicePointer(), &cu.getForce().getDevicePointer(),
+		&torque.getDevicePointer(), &cu.getEnergyBuffer().getDevicePointer(),
+		&globalFrameDipoles.getDevicePointer(), &globalFrameQuadrupoles.getDevicePointer(),
+		&fracDipoles.getDevicePointer(), &fracQuadrupoles.getDevicePointer(),
+		&fphi.getDevicePointer(), &cphi.getDevicePointer(),
+		recipBoxVectorPointer[0], recipBoxVectorPointer[1], recipBoxVectorPointer[2]};
+	cu.executeKernel(recip_mpole_energy_force_torque_kernel, recip_mpole_energy_force_torque_args, numAtoms);
+}
+
+void CudaCalcHippoChargeTransferForceKernel::torque_to_force() {
+	void* torque_to_force_args[] = {&cu.getForce().getDevicePointer(), &torque.getDevicePointer(),
+		&cu.getPosq().getDevicePointer(), &axisInfo.getDevicePointer()};
+	cu.executeKernel(torque_to_force_kernel, torque_to_force_args, numAtoms);
 }
 
 double CudaCalcHippoChargeTransferForceKernel::execute(
@@ -990,14 +1016,38 @@ double CudaCalcHippoChargeTransferForceKernel::execute(
             recipBoxVectorPointer[2] = &recipBoxVectorsFloat[2];
          }
 
+         // cartesian mpole to fractional mpole
          cmp_to_fmp();
+         // put fractrional mpole on the grid
          grid_mpole();
          fftfront();
          pme_convolution();
          fftback();
+         // get fractional potential/field/field gradient due to mpole;
+         // this function also computes the (recip+self) d/p mpole fields.
          fphi_mpole();
-         fphi_to_cphi();
+         // convert fractional phi to cartesian phi
+         fphi_to_cphi(fphi);
+
+         // recip force and torque
+         recip_mpole_energy_force_torque();
+
+         // add real space d/p mpole field -> total d/p field
+
+         // use mu_direct (alpha.field) as mu_0
+
+         // subtract T.mu_0 from E -> residual = E - T.mu_0
+
+         // reduce the residual via iterations
+
+         // assume the induced dipoles are converged
+         // (real space + self) * (energy/force/torque)
+
+         // recip energy/force/torque
       }
+
+      // map torques to force
+      torque_to_force();
    } catch (std::exception& e) {
       printf(" excep from CT execute() : %s\n", e.what());
       throw e;

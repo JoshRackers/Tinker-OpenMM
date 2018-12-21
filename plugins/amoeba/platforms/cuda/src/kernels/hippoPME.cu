@@ -508,3 +508,297 @@ extern "C" __global__ void fphi_to_cphi(const real* __restrict__ fphi,
       }
    }
 }
+
+extern "C" __global__ void recip_mpole_energy_force_torque(real4* __restrict__ posq, unsigned long long* __restrict__ forceBuffers,
+        long long* __restrict__ torqueBuffers, mixed* __restrict__ energyBuffer, const real* __restrict__ labFrameDipole,
+        const real* __restrict__ labFrameQuadrupole, const real* __restrict__ fracDipole, const real* __restrict__ fracQuadrupole,
+        const real* __restrict__ phi, const real* __restrict__ cphi_global, real3 recipBoxVecX, real3 recipBoxVecY, real3 recipBoxVecZ) {
+    real multipole[10];
+    const int deriv1[] = {1, 4, 7, 8, 10, 15, 17, 13, 14, 19};
+    const int deriv2[] = {2, 7, 5, 9, 13, 11, 18, 15, 19, 16};
+    const int deriv3[] = {3, 8, 9, 6, 14, 16, 12, 19, 17, 18};
+    mixed energy = 0;
+    __shared__ real fracToCart[3][3];
+    if (threadIdx.x == 0) {
+        fracToCart[0][0] = GRID_SIZE_X*recipBoxVecX.x;
+        fracToCart[1][0] = GRID_SIZE_X*recipBoxVecY.x;
+        fracToCart[2][0] = GRID_SIZE_X*recipBoxVecZ.x;
+        fracToCart[0][1] = GRID_SIZE_Y*recipBoxVecX.y;
+        fracToCart[1][1] = GRID_SIZE_Y*recipBoxVecY.y;
+        fracToCart[2][1] = GRID_SIZE_Y*recipBoxVecZ.y;
+        fracToCart[0][2] = GRID_SIZE_Z*recipBoxVecX.z;
+        fracToCart[1][2] = GRID_SIZE_Z*recipBoxVecY.z;
+        fracToCart[2][2] = GRID_SIZE_Z*recipBoxVecZ.z;
+    }
+    __syncthreads();
+    for (int i = blockIdx.x*blockDim.x+threadIdx.x; i < NUM_ATOMS; i += blockDim.x*gridDim.x) {
+        // Compute the torque.
+
+        multipole[0] = posq[i].w;
+        multipole[1] = labFrameDipole[i*3];
+        multipole[2] = labFrameDipole[i*3+1];
+        multipole[3] = labFrameDipole[i*3+2];
+        multipole[4] = labFrameQuadrupole[i*5];
+        multipole[5] = labFrameQuadrupole[i*5+3];
+        multipole[6] = -(multipole[4]+multipole[5]);
+        multipole[7] = 2*labFrameQuadrupole[i*5+1];
+        multipole[8] = 2*labFrameQuadrupole[i*5+2];
+        multipole[9] = 2*labFrameQuadrupole[i*5+4];
+
+        const real* cphi = &cphi_global[10*i];
+
+        torqueBuffers[i] = (long long) (EPSILON_FACTOR*(multipole[3]*cphi[2] - multipole[2]*cphi[3]
+                      + 2*(multipole[6]-multipole[5])*cphi[9]
+                      + multipole[8]*cphi[7] + multipole[9]*cphi[5]
+                      - multipole[7]*cphi[8] - multipole[9]*cphi[6])*0x100000000);
+
+        torqueBuffers[i+PADDED_NUM_ATOMS] = (long long) (EPSILON_FACTOR*(multipole[1]*cphi[3] - multipole[3]*cphi[1]
+                      + 2*(multipole[4]-multipole[6])*cphi[8]
+                      + multipole[7]*cphi[9] + multipole[8]*cphi[6]
+                      - multipole[8]*cphi[4] - multipole[9]*cphi[7])*0x100000000);
+
+        torqueBuffers[i+PADDED_NUM_ATOMS*2] = (long long) (EPSILON_FACTOR*(multipole[2]*cphi[1] - multipole[1]*cphi[2]
+                      + 2*(multipole[5]-multipole[4])*cphi[7]
+                      + multipole[7]*cphi[4] + multipole[9]*cphi[8]
+                      - multipole[7]*cphi[5] - multipole[8]*cphi[9])*0x100000000);
+
+        // Compute the force and energy.
+
+        multipole[1] = fracDipole[i*3];
+        multipole[2] = fracDipole[i*3+1];
+        multipole[3] = fracDipole[i*3+2];
+        multipole[4] = fracQuadrupole[i*6];
+        multipole[5] = fracQuadrupole[i*6+3];
+        multipole[6] = fracQuadrupole[i*6+5];
+        multipole[7] = fracQuadrupole[i*6+1];
+        multipole[8] = fracQuadrupole[i*6+2];
+        multipole[9] = fracQuadrupole[i*6+4];
+
+        real4 f = make_real4(0, 0, 0, 0);
+        for (int k = 0; k < 10; k++) {
+            energy += multipole[k]*phi[i+NUM_ATOMS*k];
+            f.x += multipole[k]*phi[i+NUM_ATOMS*deriv1[k]];
+            f.y += multipole[k]*phi[i+NUM_ATOMS*deriv2[k]];
+            f.z += multipole[k]*phi[i+NUM_ATOMS*deriv3[k]];
+        }
+        f = make_real4(EPSILON_FACTOR*(f.x*fracToCart[0][0] + f.y*fracToCart[0][1] + f.z*fracToCart[0][2]),
+                       EPSILON_FACTOR*(f.x*fracToCart[1][0] + f.y*fracToCart[1][1] + f.z*fracToCart[1][2]),
+                       EPSILON_FACTOR*(f.x*fracToCart[2][0] + f.y*fracToCart[2][1] + f.z*fracToCart[2][2]), 0);
+        forceBuffers[i] -= static_cast<unsigned long long>((long long) (f.x*0x100000000));
+        forceBuffers[i+PADDED_NUM_ATOMS] -= static_cast<unsigned long long>((long long) (f.y*0x100000000));
+        forceBuffers[i+PADDED_NUM_ATOMS*2] -= static_cast<unsigned long long>((long long) (f.z*0x100000000));
+    }
+    energyBuffer[blockIdx.x*blockDim.x+threadIdx.x] += 0.5f*EPSILON_FACTOR*energy;
+}
+
+extern "C" __global__ void torque_to_force(unsigned long long* __restrict__ forceBuffers, const long long* __restrict__ torqueBuffers,
+        const real4* __restrict__ posq, const int4* __restrict__ multipoleParticles) {
+    const int U = 0;
+    const int V = 1;
+    const int W = 2;
+    const int R = 3;
+    const int S = 4;
+    const int UV = 5;
+    const int UW = 6;
+    const int VW = 7;
+    const int UR = 8;
+    const int US = 9;
+    const int VS = 10;
+    const int WS = 11;
+    const int LastVectorIndex = 12;
+
+    const int X = 0;
+    const int Y = 1;
+    const int Z = 2;
+    const int I = 3;
+
+    const real torqueScale = RECIP((double) 0x100000000);
+
+    real3 forces[4];
+    real norms[LastVectorIndex];
+    real3 vector[LastVectorIndex];
+    real angles[LastVectorIndex][2];
+
+    for (int atom = blockIdx.x*blockDim.x + threadIdx.x; atom < NUM_ATOMS; atom += gridDim.x*blockDim.x) {
+        int4 particles = multipoleParticles[atom];
+        int axisAtom = particles.z;
+        int axisType = particles.w;
+
+        // NoAxisType
+
+        if (axisType < 5 && particles.z >= 0) {
+            real3 atomPos = trimTo3(posq[atom]);
+            vector[U] = atomPos - trimTo3(posq[axisAtom]);
+            norms[U] = normVector(vector[U]);
+
+            // V is 2nd bond, or "random" vector not parallel to U
+
+            if (axisType != 4 && particles.x >= 0) {
+                vector[V] = atomPos - trimTo3(posq[particles.x]);
+            }
+            else {
+                vector[V].x = 1;
+                vector[V].y = 0;
+                vector[V].z = 0;
+                if (abs(vector[U].x/norms[U]) > 0.866) {
+                    vector[V].x = 0;
+                    vector[V].y = 1;
+                }
+            }
+            norms[V] = normVector(vector[V]);
+
+            // W = UxV
+
+            if (axisType < 2 || axisType > 3)
+                vector[W] = cross(vector[U], vector[V]);
+            else
+                vector[W] = atomPos - trimTo3(posq[particles.y]);
+            norms[W] = normVector(vector[W]);
+
+            vector[UV] = cross(vector[V], vector[U]);
+            vector[UW] = cross(vector[W], vector[U]);
+            vector[VW] = cross(vector[W], vector[V]);
+
+            norms[UV] = normVector(vector[UV]);
+            norms[UW] = normVector(vector[UW]);
+            norms[VW] = normVector(vector[VW]);
+
+            angles[UV][0] = dot(vector[U], vector[V]);
+            angles[UV][1] = SQRT(1 - angles[UV][0]*angles[UV][0]);
+
+            angles[UW][0] = dot(vector[U], vector[W]);
+            angles[UW][1] = SQRT(1 - angles[UW][0]*angles[UW][0]);
+
+            angles[VW][0] = dot(vector[V], vector[W]);
+            angles[VW][1] = SQRT(1 - angles[VW][0]*angles[VW][0]);
+
+            real dphi[3];
+            real3 torque = make_real3(torqueScale*torqueBuffers[atom], torqueScale*torqueBuffers[atom+PADDED_NUM_ATOMS], torqueScale*torqueBuffers[atom+PADDED_NUM_ATOMS*2]);
+            dphi[U] = -dot(vector[U], torque);
+            dphi[V] = -dot(vector[V], torque);
+            dphi[W] = -dot(vector[W], torque);
+
+            // z-then-x and bisector
+
+            if (axisType == 0 || axisType == 1) {
+                real factor1 = dphi[V]/(norms[U]*angles[UV][1]);
+                real factor2 = dphi[W]/(norms[U]);
+                real factor3 = -dphi[U]/(norms[V]*angles[UV][1]);
+                real factor4 = 0;
+                if (axisType == 1) {
+                    factor2 *= 0.5f;
+                    factor4 = 0.5f*dphi[W]/(norms[V]);
+                }
+                forces[Z] = vector[UV]*factor1 + factor2*vector[UW];
+                forces[X] = vector[UV]*factor3 + factor4*vector[VW];
+                forces[I] = -(forces[X]+forces[Z]);
+                forces[Y] = make_real3(0);
+            }
+            else if (axisType == 2) {
+                // z-bisect
+
+                vector[R] = vector[V] + vector[W];
+
+                vector[S] = cross(vector[U], vector[R]);
+
+                norms[R] = normVector(vector[R]);
+                norms[S] = normVector(vector[S]);
+
+                vector[UR] = cross(vector[R], vector[U]);
+                vector[US] = cross(vector[S], vector[U]);
+                vector[VS] = cross(vector[S], vector[V]);
+                vector[WS] = cross(vector[S], vector[W]);
+
+                norms[UR] = normVector(vector[UR]);
+                norms[US] = normVector(vector[US]);
+                norms[VS] = normVector(vector[VS]);
+                norms[WS] = normVector(vector[WS]);
+
+                angles[UR][0] = dot(vector[U], vector[R]);
+                angles[UR][1] = SQRT(1 - angles[UR][0]*angles[UR][0]);
+
+                angles[US][0] = dot(vector[U], vector[S]);
+                angles[US][1] = SQRT(1 - angles[US][0]*angles[US][0]);
+
+                angles[VS][0] = dot(vector[V], vector[S]);
+                angles[VS][1] = SQRT(1 - angles[VS][0]*angles[VS][0]);
+
+                angles[WS][0] = dot(vector[W], vector[S]);
+                angles[WS][1] = SQRT(1 - angles[WS][0]*angles[WS][0]);
+
+                real3 t1 = vector[V] - vector[S]*angles[VS][0];
+                real3 t2 = vector[W] - vector[S]*angles[WS][0];
+                normVector(t1);
+                normVector(t2);
+                real ut1cos = dot(vector[U], t1);
+                real ut1sin = SQRT(1 - ut1cos*ut1cos);
+                real ut2cos = dot(vector[U], t2);
+                real ut2sin = SQRT(1 - ut2cos*ut2cos);
+
+                real dphiR = -dot(vector[R], torque);
+                real dphiS = -dot(vector[S], torque);
+
+                real factor1 = dphiR/(norms[U]*angles[UR][1]);
+                real factor2 = dphiS/(norms[U]);
+                real factor3 = dphi[U]/(norms[V]*(ut1sin+ut2sin));
+                real factor4 = dphi[U]/(norms[W]*(ut1sin+ut2sin));
+                forces[Z] = vector[UR]*factor1 + factor2*vector[US];
+                forces[X] = (angles[VS][1]*vector[S] - angles[VS][0]*t1)*factor3;
+                forces[Y] = (angles[WS][1]*vector[S] - angles[WS][0]*t2)*factor4;
+                forces[I] = -(forces[X] + forces[Y] + forces[Z]);
+            }
+            else if (axisType == 3) {
+                // 3-fold
+
+                forces[Z] = (vector[UW]*dphi[W]/(norms[U]*angles[UW][1]) +
+                            vector[UV]*dphi[V]/(norms[U]*angles[UV][1]) -
+                            vector[UW]*dphi[U]/(norms[U]*angles[UW][1]) -
+                            vector[UV]*dphi[U]/(norms[U]*angles[UV][1]))/3;
+
+                forces[X] = (vector[VW]*dphi[W]/(norms[V]*angles[VW][1]) -
+                            vector[UV]*dphi[U]/(norms[V]*angles[UV][1]) -
+                            vector[VW]*dphi[V]/(norms[V]*angles[VW][1]) +
+                            vector[UV]*dphi[V]/(norms[V]*angles[UV][1]))/3;
+
+                forces[Y] = (-vector[UW]*dphi[U]/(norms[W]*angles[UW][1]) -
+                            vector[VW]*dphi[V]/(norms[W]*angles[VW][1]) +
+                            vector[UW]*dphi[W]/(norms[W]*angles[UW][1]) +
+                            vector[VW]*dphi[W]/(norms[W]*angles[VW][1]))/3;
+                forces[I] = -(forces[X] + forces[Y] + forces[Z]);
+            }
+            else if (axisType == 4) {
+                // z-only
+
+                forces[Z] = vector[UV]*dphi[V]/(norms[U]*angles[UV][1]) + vector[UW]*dphi[W]/norms[U];
+                forces[X] = make_real3(0);
+                forces[Y] = make_real3(0);
+                forces[I] = -forces[Z];
+            }
+            else {
+                forces[Z] = make_real3(0);
+                forces[X] = make_real3(0);
+                forces[Y] = make_real3(0);
+                forces[I] = make_real3(0);
+            }
+
+            // Store results
+
+            atomicAdd(&forceBuffers[particles.z], static_cast<unsigned long long>((long long) (forces[Z].x*0x100000000)));
+            atomicAdd(&forceBuffers[particles.z+PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long) (forces[Z].y*0x100000000)));
+            atomicAdd(&forceBuffers[particles.z+2*PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long) (forces[Z].z*0x100000000)));
+            if (axisType != 4) {
+                atomicAdd(&forceBuffers[particles.x], static_cast<unsigned long long>((long long) (forces[X].x*0x100000000)));
+                atomicAdd(&forceBuffers[particles.x+PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long) (forces[X].y*0x100000000)));
+                atomicAdd(&forceBuffers[particles.x+2*PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long) (forces[X].z*0x100000000)));
+            }
+            if ((axisType == 2 || axisType == 3) && particles.y > -1) {
+                atomicAdd(&forceBuffers[particles.y], static_cast<unsigned long long>((long long) (forces[Y].x*0x100000000)));
+                atomicAdd(&forceBuffers[particles.y+PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long) (forces[Y].y*0x100000000)));
+                atomicAdd(&forceBuffers[particles.y+2*PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long) (forces[Y].z*0x100000000)));
+            }
+            atomicAdd(&forceBuffers[atom], static_cast<unsigned long long>((long long) (forces[I].x*0x100000000)));
+            atomicAdd(&forceBuffers[atom+PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long) (forces[I].y*0x100000000)));
+            atomicAdd(&forceBuffers[atom+2*PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long) (forces[I].z*0x100000000)));
+        }
+    }
+}

@@ -591,6 +591,12 @@ extern "C" __global__ void recip_mpole_energy_force_torque(real4* __restrict__ p
     energyBuffer[blockIdx.x*blockDim.x+threadIdx.x] += 0.5f*EPSILON_FACTOR*energy;
 }
 
+inline __device__ real normVector(real3& v) {
+    real n = SQRT(dot(v, v));
+    v *= (n > 0 ? RECIP(n) : 0);
+    return n;
+}
+
 extern "C" __global__ void torque_to_force(unsigned long long* __restrict__ forceBuffers, const long long* __restrict__ torqueBuffers,
         const real4* __restrict__ posq, const int4* __restrict__ multipoleParticles) {
     const int U = 0;

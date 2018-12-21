@@ -1,5 +1,3 @@
-// #define ZW_DEBUG__ 0
-
 class CudaCalcHippoChargeTransferForceKernel::ForceInfo : public CudaForceInfo {
 public:
    ForceInfo(const HippoChargeTransferForce& force)
@@ -630,43 +628,13 @@ void CudaCalcHippoChargeTransferForceKernel::initializeScaleFactors() {
    covalentFlags.upload(covalentFlagsVec);
 }
 
-static const char* fmt_999 = "%20s%12.6lf%12.6lf%12.6lf%8d\n";
-static const char* fmt_993 = "%20s%12.6lf%12.6lf%12.6lf\n";
-static const char* fmt_991 = "%20s%18.4E%8d\n";
-void               CudaCalcHippoChargeTransferForceKernel::rotpole() {
+void CudaCalcHippoChargeTransferForceKernel::rotpole() {
    void* rotpoleArgs[] = {&cu.getPosq().getDevicePointer(),
       &axisInfo.getDevicePointer(), &localFrameDipoles.getDevicePointer(),
       &localFrameQuadrupoles.getDevicePointer(),
       &globalFrameDipoles.getDevicePointer(),
       &globalFrameQuadrupoles.getDevicePointer()};
    cu.executeKernel(rotpole_kernel, rotpoleArgs, cu.getNumAtoms());
-
-#if ZW_DEBUG__ || 1
-   vector<long long> gdv(globalFrameDipoles.getSize()),
-      gqv(globalFrameQuadrupoles.getSize());
-   globalFrameDipoles.download(gdv.data());
-   globalFrameQuadrupoles.download(gqv.data());
-   const float scal = 10.0f;
-   for (int i = 0; i < numAtoms; ++i) {
-      if (useDoublePrecision) {
-         double* gd = (double*)gdv.data();
-         double* gq = (double*)gqv.data();
-      printf(fmt_999, "DPL", scal * gd[3 * i], scal * gd[3 * i + 1],
-         scal * gd[3 * i + 2], i + 1);
-      printf(fmt_993, "QDP", scal * scal * gq[5 * i],
-         scal * scal * gq[5 * i + 3],
-         -scal * scal * (gq[5 * i] + gq[5 * i + 3]));
-      } else {
-         float* gd = (float*)gdv.data();
-      float* gq = (float*)gqv.data();
-      printf(fmt_999, "DPL", scal * gd[3 * i], scal * gd[3 * i + 1],
-         scal * gd[3 * i + 2], i + 1);
-      printf(fmt_993, "QDP", scal * scal * gq[5 * i],
-         scal * scal * gq[5 * i + 3],
-         -scal * scal * (gq[5 * i] + gq[5 * i + 3]));
-      }  
-   }
-#endif
 }
 
 void CudaCalcHippoChargeTransferForceKernel::cmp_to_fmp() {
@@ -676,32 +644,6 @@ void CudaCalcHippoChargeTransferForceKernel::cmp_to_fmp() {
       recipBoxVectorPointer[0], recipBoxVectorPointer[1],
       recipBoxVectorPointer[2]};
    cu.executeKernel(cmp_to_fmp_kernel, cmp_to_fmp_args, numAtoms);
-
-#if ZW_DEBUG__ || 1
-   vector<long long> fv(fracDipoles.getSize());
-   vector<long long> fqv(fracQuadrupoles.getSize());
-   fracDipoles.download(fv.data());
-   fracQuadrupoles.download(fqv.data());
-   for (int i = 0; i < numAtoms; ++i) {
-      if (useDoublePrecision) {
-         double* f = (double*) fv.data();
-         double* fq = (double*) fqv.data();
-      printf(fmt_999, "FMP", f[3 * i], f[3 * i + 1], f[3 * i + 2], i + 1);
-      printf(fmt_993, "FMP", fq[6 * i], fq[6 * i + 3],
-         fq[6 * i + 5]); // xx 0, yy 3, zz 5
-      printf(fmt_993, "FMP", fq[6 * i + 1], fq[6 * i + 2],
-         fq[6 * i + 4]); // xy 1, xz 2, yz 4
-   } else {
-      float* f = (float*) fv.data();
-      float* fq = (float*) fqv.data();
-            printf(fmt_999, "FMP", f[3 * i], f[3 * i + 1], f[3 * i + 2], i + 1);
-      printf(fmt_993, "FMP", fq[6 * i], fq[6 * i + 3],
-         fq[6 * i + 5]); // xx 0, yy 3, zz 5
-      printf(fmt_993, "FMP", fq[6 * i + 1], fq[6 * i + 2],
-         fq[6 * i + 4]); // xy 1, xz 2, yz 4
-   }
-   }
-#endif
 }
 
 void CudaCalcHippoChargeTransferForceKernel::grid_mpole() {
@@ -717,22 +659,6 @@ void CudaCalcHippoChargeTransferForceKernel::grid_mpole() {
       cu.executeKernel(
          grid_convert_to_double_kernel, grid_convert_to_double_args, numAtoms);
    }
-#if ZW_DEBUG__ || 1
-   printf(" inside grid_mpole\n");
-   vector<long long> fv(2*qgrid.getSize());
-   qgrid.download(fv.data());
-   int ntot = nfft1 * nfft2 * nfft3;
-   for (int i = 0; i < ntot; i += 3) {
-      if (useDoublePrecision) {
-         double2* f = (double2*) fv.data();
-         printf(fmt_999, "qgrid.x", f[i].x, f[i + 1].x, f[i + 2].x, i + 1);
-      } else {
-         float2* f = (float2*) fv.data();
-         printf(fmt_999, "qgrid.x", f[i].x, f[i + 1].x, f[i + 2].x, i + 1);
-      }
-      
-   }
-#endif
 }
 
 void CudaCalcHippoChargeTransferForceKernel::fftfront() {
@@ -743,66 +669,9 @@ void CudaCalcHippoChargeTransferForceKernel::fftfront() {
       cufftExecC2C(fft, (float2*)qgrid.getDevicePointer(),
          (float2*)qgrid.getDevicePointer(), CUFFT_FORWARD);
    }
-
-#if ZW_DEBUG__ || 1
-   printf(" inside fftfront\n");
-   vector<double2> fv(qgrid.getSize());
-   qgrid.download(fv.data());
-   int ntot = nfft1 * nfft2 * nfft3;
-   for (int i = 0; i < ntot; i += 3) {
-      if (useDoublePrecision) {
-         double2* f = fv.data();
-         printf(fmt_999, "fftf grid.x", f[i].x, f[i + 1].x, f[i + 2].x, i + 1);
-         printf(fmt_999, "fftf grid.y", f[i].y, f[i + 1].y, f[i + 2].y, i + 1);
-      } else {
-         float2* f = (float2*)fv.data();
-         printf(fmt_999, "fftf grid.x", f[i].x, f[i + 1].x, f[i + 2].x, i + 1);
-         printf(fmt_999, "fftf grid.y", f[i].y, f[i + 1].y, f[i + 2].y, i + 1);
-      }  
-   }
-#endif
 }
 
 void CudaCalcHippoChargeTransferForceKernel::pme_convolution() {
-#if ZW_DEBUG__ || 1
-   vector<double> bv;
-
-   bv.reserve(bsmod1.getSize());
-   bsmod1.download(bv);
-   for (int i = 0; i < bsmod1.getSize(); ++i) {
-      if (useDoublePrecision) {
-         double* f = bv.data();
-         printf(fmt_991, "bsmod1", f[i], i + 1);
-      } else {
-         float* f = (float*) bv.data();
-         printf(fmt_991, "bsmod1", f[i], i + 1);
-      }
-   }
-
-   bv.reserve(bsmod2.getSize());
-   bsmod2.download(bv);
-   for (int i = 0; i < bsmod2.getSize(); ++i) {
-      if (useDoublePrecision) {
-         double* f = bv.data();
-         printf(fmt_991, "bsmod2", f[i], i + 1);
-      } else {
-         float* f = (float*) bv.data();
-         printf(fmt_991, "bsmod2", f[i], i + 1);
-      }
-   }
-
-   bv.reserve(bsmod3.getSize());
-   bsmod3.download(bv);
-   for (int i = 0; i < bsmod3.getSize(); ++i) {
-      if (useDoublePrecision) {
-         double* f = bv.data();
-         printf(fmt_991, "bsmod3", f[i], i + 1);
-      } else {
-         float* f = (float*) bv.data();
-         printf(fmt_991, "bsmod3", f[i], i + 1);
-      }
-   }
-#endif
    void* pme_convolution_args[]
       = {&qgrid.getDevicePointer(), &bsmod1.getDevicePointer(),
          &bsmod2.getDevicePointer(), &bsmod3.getDevicePointer(),
@@ -810,23 +679,6 @@ void CudaCalcHippoChargeTransferForceKernel::pme_convolution() {
          recipBoxVectorPointer[1], recipBoxVectorPointer[2]};
    cu.executeKernel(
       pme_convolution_kernel, pme_convolution_args, nfft1 * nfft2 * nfft3, 256);
-#if ZW_DEBUG__ || 1
-   printf(" inside pme convolution\n");
-   vector<double2> fv(qgrid.getSize());
-   qgrid.download(fv.data());
-   int ntot = nfft1 * nfft2 * nfft3;
-   for (int i = 0; i < ntot; i += 3) {
-      if (useDoublePrecision) {
-         double2* f = fv.data();
-         printf(fmt_999, "conv grid.x", f[i].x, f[i + 1].x, f[i + 2].x, i + 1);
-         printf(fmt_999, "conv grid.y", f[i].y, f[i + 1].y, f[i + 2].y, i + 1);
-      } else {
-         float2* f = (float2*)fv.data();
-         printf(fmt_999, "conv grid.x", f[i].x, f[i + 1].x, f[i + 2].x, i + 1);
-         printf(fmt_999, "conv grid.y", f[i].y, f[i + 1].y, f[i + 2].y, i + 1);
-      }
-   }
-#endif
 }
 
 void CudaCalcHippoChargeTransferForceKernel::fftback() {
@@ -837,24 +689,6 @@ void CudaCalcHippoChargeTransferForceKernel::fftback() {
       cufftExecC2C(fft, (float2*)qgrid.getDevicePointer(),
          (float2*)qgrid.getDevicePointer(), CUFFT_INVERSE);
    }
-
-#if ZW_DEBUG__ || 1
-   printf(" inside fftback\n");
-   vector<double2> fv(qgrid.getSize());
-   qgrid.download(fv.data());
-   int ntot = nfft1 * nfft2 * nfft3;
-   for (int i = 0; i < ntot; i += 3) {
-      if (useDoublePrecision) {
-         double2* f = fv.data();
-         printf(fmt_999, "fftb grid.x", f[i].x, f[i + 1].x, f[i + 2].x, i + 1);
-         printf(fmt_999, "fftb grid.y", f[i].y, f[i + 1].y, f[i + 2].y, i + 1);
-      } else {
-         float2* f = (float2*)fv.data();
-         printf(fmt_999, "fftb grid.x", f[i].x, f[i + 1].x, f[i + 2].x, i + 1);
-         printf(fmt_999, "fftb grid.y", f[i].y, f[i + 1].y, f[i + 2].y, i + 1);
-      }
-   }
-#endif
 }
 
 void CudaCalcHippoChargeTransferForceKernel::fphi_mpole() {
@@ -866,32 +700,6 @@ void CudaCalcHippoChargeTransferForceKernel::fphi_mpole() {
       cu.getPeriodicBoxVecZPointer(), recipBoxVectorPointer[0],
       recipBoxVectorPointer[1], recipBoxVectorPointer[2]};
    cu.executeKernel(fphi_mpole_kernel, fphi_mpole_args, numAtoms);
-
-#if ZW_DEBUG__ || 1
-   printf(" inside fphi_mpole\n");
-   vector<double> fphiv(fphi.getSize());
-      fphi.download(fphiv);
-        for (int i = 0; i < numAtoms; ++i) {
-            int pos[] = {i+numAtoms, i+2*numAtoms, i+3*numAtoms};
-            if (useDoublePrecision) {
-                double* f = fphiv.data();
-                printf(fmt_999, "fphi_234", f[pos[0]], f[pos[1]], f[pos[2]], i+1);
-            } else {
-                float* f = (float*) fphiv.data();
-                printf(fmt_999, "fphi_234", f[pos[0]], f[pos[1]], f[pos[2]], i+1);
-            }
-        }
-   vector<long long> pdv(3*paddedNumAtoms);
-   mpoleField.download(pdv);
-   for (int i = 0; i < numAtoms; ++i) {
-      long long* pd = pdv.data();
-      int pos[] = {i, i+paddedNumAtoms, i+2*paddedNumAtoms};
-      double scal = 1.0 / 0x100000000;
-      scal /= 100;
-      printf(" field  %6d xyz %14.6lf%14.6lf%14.6lf\n", i + 1,
-               scal * pd[pos[0]], scal * pd[pos[1]], scal * pd[pos[2]]);
-   }
-#endif
 }
 
 void CudaCalcHippoChargeTransferForceKernel::fphi_to_cphi(CudaArray& phiarray) {
@@ -899,23 +707,6 @@ void CudaCalcHippoChargeTransferForceKernel::fphi_to_cphi(CudaArray& phiarray) {
       &cphi.getDevicePointer(), recipBoxVectorPointer[0],
       recipBoxVectorPointer[1], recipBoxVectorPointer[2]};
    cu.executeKernel(fphi_to_cphi_kernel, fphi_to_cphi_args, numAtoms);
-
-#if ZW_DEBUG__ || 1
-   printf(" inside fphi_to_cphi\n");
-   vector<double> fv(cphi.getSize());
-   cphi.download(fv.data());
-   for (int i = 0; i < numAtoms; ++i) {
-      int pos[] = {10*i+1, 10*i+2, 10*i+3};
-      // printf(fmt_999, "CPHI", f[10 * i + 1], f[10 * i + 2], f[10 * i + 3], i + 1);
-      if (useDoublePrecision) {
-         double* f = fv.data();
-         printf(fmt_999, "cphi", f[pos[0]], f[pos[1]], f[pos[2]], i+1);
-      } else {
-         float* f = (float*) fv.data();
-         printf(fmt_999, "cphi", f[pos[0]], f[pos[1]], f[pos[2]], i+1);
-      }
-   }
-#endif
 }
 
 void CudaCalcHippoChargeTransferForceKernel::recip_mpole_energy_force_torque() {

@@ -49,9 +49,9 @@ CudaCalcHippoChargeTransferForceKernel::
 
 class HippoParameterCopier {
 private:
-   bool           useDoublePrecision;
-   CudaContext&   cu;
-   CudaArray&     array;
+   bool useDoublePrecision;
+   CudaContext& cu;
+   CudaArray& array;
    vector<double> arrayVec;
 
 public:
@@ -70,7 +70,7 @@ public:
 
    void operator()(int pos, double param) {
       double* ptrd = &arrayVec[0];
-      float*  ptrf = (float*)ptrd;
+      float* ptrf = (float*)ptrd;
       if (useDoublePrecision) {
          ptrd[pos] = param;
       } else {
@@ -90,12 +90,12 @@ void CudaCalcHippoChargeTransferForceKernel::initialize(
       map<string, string> defines;
 
       useDoublePrecision = cu.getUseDoublePrecision();
-      numAtoms           = cu.getNumAtoms();
-      paddedNumAtoms     = cu.getPaddedNumAtoms();
+      numAtoms = cu.getNumAtoms();
+      paddedNumAtoms = cu.getPaddedNumAtoms();
       int elementSize = (useDoublePrecision ? sizeof(double) : sizeof(float));
-      defines["NUM_ATOMS"]        = cu.intToString(numAtoms);
+      defines["NUM_ATOMS"] = cu.intToString(numAtoms);
       defines["PADDED_NUM_ATOMS"] = cu.intToString(paddedNumAtoms);
-      defines["USE_CUTOFF"]       = "";
+      defines["USE_CUTOFF"] = "";
 
       // axis, charge from posq, dipole, and quadrupole
       axisInfo.initialize<int4>(cu, paddedNumAtoms, "axisInfo");
@@ -108,57 +108,64 @@ void CudaCalcHippoChargeTransferForceKernel::initialize(
          cu, 3 * paddedNumAtoms, elementSize, "globalFrameDipoles");
       globalFrameQuadrupoles.initialize(
          cu, 5 * paddedNumAtoms, elementSize, "globalFrameQuadrupoles");
+      inducedDipole.initialize(
+         cu, 3 * paddedNumAtoms, elementSize, "inducedDipole");
+      inducedDipoleP.initialize(
+         cu, 3 * paddedNumAtoms, elementSize, "inducedDipoleP");
       mpoleField.initialize(
          cu, 3 * paddedNumAtoms, sizeof(long long), "mpoleField");
       mpoleFieldP.initialize(
          cu, 3 * paddedNumAtoms, sizeof(long long), "mpoleFieldP");
-      torque.initialize(
-      	 cu, 3 * paddedNumAtoms, sizeof(long long), "torque");
+      inducedField.initialize(
+         cu, 3 * paddedNumAtoms, sizeof(long long), "inducedField");
+      inducedFieldP.initialize(
+         cu, 3 * paddedNumAtoms, sizeof(long long), "inducedFieldP");
+      torque.initialize(cu, 3 * paddedNumAtoms, sizeof(long long), "torque");
       cu.addAutoclearBuffer(mpoleField);
       cu.addAutoclearBuffer(mpoleFieldP);
       cu.addAutoclearBuffer(torque);
 
-      vector<int4>    axisInfoVec(axisInfo.getSize());
+      vector<int4> axisInfoVec(axisInfo.getSize());
       vector<double4> posqVec(posq.getSize());
-      vector<double>  localFrameDipolesVec(localFrameDipoles.getSize());
-      vector<double>  localFrameQuadrupolesVec(localFrameQuadrupoles.getSize());
+      vector<double> localFrameDipolesVec(localFrameDipoles.getSize());
+      vector<double> localFrameQuadrupolesVec(localFrameQuadrupoles.getSize());
 
-      double4* posqd        = &posqVec[0];
-      double*  localdipoled = &localFrameDipolesVec[0];
-      double*  localquadd   = &localFrameQuadrupolesVec[0];
-      float4*  posqf        = (float4*)posqd;
-      float*   localdipolef = (float*)localdipoled;
-      float*   localquadf   = (float*)localquadd;
+      double4* posqd = &posqVec[0];
+      double* localdipoled = &localFrameDipolesVec[0];
+      double* localquadd = &localFrameQuadrupolesVec[0];
+      float4* posqf = (float4*)posqd;
+      float* localdipolef = (float*)localdipoled;
+      float* localquadf = (float*)localquadd;
 
       for (int ii = 0; ii < numAtoms; ++ii) {
-         int            axisType, atomz, atomx, atomy;
-         double         charge;
+         int axisType, atomz, atomx, atomy;
+         double charge;
          vector<double> dipole, quadrupole;
          force.getMultipoleParameters(
             ii, charge, dipole, quadrupole, axisType, atomz, atomx, atomy);
 
          axisInfoVec[ii] = make_int4(atomx, atomy, atomz, axisType);
          if (useDoublePrecision) {
-            posqd[ii]                = make_double4(0, 0, 0, charge);
-            localdipoled[3 * ii]     = dipole[0];
+            posqd[ii] = make_double4(0, 0, 0, charge);
+            localdipoled[3 * ii] = dipole[0];
             localdipoled[3 * ii + 1] = dipole[1];
             localdipoled[3 * ii + 2] = dipole[2];
-            localquadd[5 * ii]       = quadrupole[0]; // xx
-            localquadd[5 * ii + 1]   = quadrupole[1]; // xy
-            localquadd[5 * ii + 2]   = quadrupole[2]; // xz
-            localquadd[5 * ii + 3]   = quadrupole[4]; // yy
-            localquadd[5 * ii + 4]   = quadrupole[5]; // yz
-                                                      // zz is unnecessary
+            localquadd[5 * ii] = quadrupole[0];     // xx
+            localquadd[5 * ii + 1] = quadrupole[1]; // xy
+            localquadd[5 * ii + 2] = quadrupole[2]; // xz
+            localquadd[5 * ii + 3] = quadrupole[4]; // yy
+            localquadd[5 * ii + 4] = quadrupole[5]; // yz
+                                                    // zz is unnecessary
          } else {
-            posqf[ii]                = make_float4(0, 0, 0, (float)charge);
-            localdipolef[3 * ii]     = (float)dipole[0];
+            posqf[ii] = make_float4(0, 0, 0, (float)charge);
+            localdipolef[3 * ii] = (float)dipole[0];
             localdipolef[3 * ii + 1] = (float)dipole[1];
             localdipolef[3 * ii + 2] = (float)dipole[2];
-            localquadf[5 * ii]       = (float)quadrupole[0]; // xx
-            localquadf[5 * ii + 1]   = (float)quadrupole[1]; // xy
-            localquadf[5 * ii + 2]   = (float)quadrupole[2]; // xz
-            localquadf[5 * ii + 3]   = (float)quadrupole[4]; // yy
-            localquadf[5 * ii + 4]   = (float)quadrupole[5]; // yz
+            localquadf[5 * ii] = (float)quadrupole[0];     // xx
+            localquadf[5 * ii + 1] = (float)quadrupole[1]; // xy
+            localquadf[5 * ii + 2] = (float)quadrupole[2]; // xz
+            localquadf[5 * ii + 3] = (float)quadrupole[4]; // yy
+            localquadf[5 * ii + 4] = (float)quadrupole[5]; // yz
             // zz is unnecessary
          }
       }
@@ -169,10 +176,10 @@ void CudaCalcHippoChargeTransferForceKernel::initialize(
       localFrameQuadrupoles.upload(&localFrameQuadrupolesVec[0]);
 
       // PME
-      pmeorder          = 0;
+      pmeorder = 0;
       pmeCutoffDistance = 0.0;
       if (force.getUsePME()) {
-         pmeorder          = force.getPMEOrder();
+         pmeorder = force.getPMEOrder();
          pmeCutoffDistance = force.getPMECutoffDistance();
          int nx, ny, nz;
          force.getPMEParameters(ewaldAlpha, nx, ny, nz);
@@ -187,17 +194,17 @@ void CudaCalcHippoChargeTransferForceKernel::initialize(
          nfft2 = CudaFFT3D::findLegalDimension(ny);
          nfft3 = CudaFFT3D::findLegalDimension(nz);
 
-         defines["PME_ORDER"]    = cu.intToString(pmeorder);
-         defines["EWALD_ALPHA"]  = cu.doubleToString(ewaldAlpha);
-         defines["SQRT_PI"]      = cu.doubleToString(sqrt(M_PI));
-         defines["USE_EwALD"]    = "";
-         defines["USE_CUTOFF"]   = "";
+         defines["PME_ORDER"] = cu.intToString(pmeorder);
+         defines["EWALD_ALPHA"] = cu.doubleToString(ewaldAlpha);
+         defines["SQRT_PI"] = cu.doubleToString(sqrt(M_PI));
+         defines["USE_EwALD"] = "";
+         defines["USE_CUTOFF"] = "";
          defines["USE_PERIODIC"] = "";
          defines["PME_CUTOFF_SQUARED"]
             = cu.doubleToString(pmeCutoffDistance * pmeCutoffDistance);
-         defines["GRID_SIZE_X"]    = cu.intToString(nfft1);
-         defines["GRID_SIZE_Y"]    = cu.intToString(nfft2);
-         defines["GRID_SIZE_Z"]    = cu.intToString(nfft3);
+         defines["GRID_SIZE_X"] = cu.intToString(nfft1);
+         defines["GRID_SIZE_Y"] = cu.intToString(nfft2);
+         defines["GRID_SIZE_Z"] = cu.intToString(nfft3);
          defines["EPSILON_FACTOR"] = cu.doubleToString(138.9354558456);
 
          // PME gird
@@ -233,19 +240,19 @@ void CudaCalcHippoChargeTransferForceKernel::initialize(
          // initialize bsmod (b-spline moduli)
          // reference: tinker subroutine "moduli", "bspline", "dftmod"
          vector<double> data(pmeorder);
-         double         x = 0.0;
-         data[0]          = 1.0 - x;
-         data[1]          = x;
+         double x = 0.0;
+         data[0] = 1.0 - x;
+         data[1] = x;
          for (int i = 2; i < pmeorder; i++) {
             double denom = 1.0 / i;
-            data[i]      = x * data[i - 1] * denom;
+            data[i] = x * data[i - 1] * denom;
             for (int j = 1; j < i; j++)
                data[i - j] = ((x + j) * data[i - j - 1]
                                 + ((i - j + 1) - x) * data[i - j])
                   * denom;
             data[0] = (1.0 - x) * data[0] * denom;
          }
-         int            maxSize = max(max(nfft1, nfft2), nfft3);
+         int maxSize = max(max(nfft1, nfft2), nfft3);
          vector<double> bsplines_data(maxSize + 1, 0.0);
          for (int i = 2; i <= pmeorder + 1; i++) {
             bsplines_data[i] = data[i - 2];
@@ -300,7 +307,7 @@ void CudaCalcHippoChargeTransferForceKernel::initialize(
                else {
                   double sum1 = 1.0;
                   double sum2 = 1.0;
-                  factor      = M_PI * k / ndata;
+                  factor = M_PI * k / ndata;
                   for (int j = 1; j <= jcut; j++) {
                      double arg = factor / (factor + M_PI * j);
                      sum1 += pow(arg, pmeorder);
@@ -337,8 +344,8 @@ void CudaCalcHippoChargeTransferForceKernel::initialize(
       }
 
       // charge transfer
-      double chgtrntaper      = force.getCTTaperDistance();
-      double chgtrncutoff     = force.getCTCutoffDistance();
+      double chgtrntaper = force.getCTTaperDistance();
+      double chgtrncutoff = force.getCTCutoffDistance();
       defines["CHGTRN_TAPER"] = cu.doubleToString(chgtrntaper);
       defines["CHGTRN_CUTOFF_SQUARED"]
          = cu.doubleToString(chgtrncutoff * chgtrncutoff);
@@ -373,8 +380,8 @@ void CudaCalcHippoChargeTransferForceKernel::initialize(
 
       double* chgctd = &chgctVec[0];
       double* dmpctd = &dmpctVec[0];
-      float*  chgctf = (float*)chgctd;
-      float*  dmpctf = (float*)dmpctd;
+      float* chgctf = (float*)chgctd;
+      float* dmpctf = (float*)dmpctd;
 
       for (int ii = 0; ii < numAtoms; ++ii) {
          double a, c;
@@ -391,8 +398,8 @@ void CudaCalcHippoChargeTransferForceKernel::initialize(
       dmpct.upload(&dmpctVec[0]);
 
       // repulsion
-      double repeltaper      = force.getRepelTaperDistance();
-      double repelcutoff     = force.getRepelCutoffDistance();
+      double repeltaper = force.getRepelTaperDistance();
+      double repelcutoff = force.getRepelCutoffDistance();
       defines["REPEL_TAPER"] = cu.doubleToString(repeltaper);
       defines["REPEL_CUTOFF_SQUARED"]
          = cu.doubleToString(repelcutoff * repelcutoff);
@@ -413,9 +420,9 @@ void CudaCalcHippoChargeTransferForceKernel::initialize(
       double* sizprd = &sizprVec[0];
       double* dmpprd = &dmpprVec[0];
       double* eleprd = &eleprVec[0];
-      float*  sizprf = (float*)sizprd;
-      float*  dmpprf = (float*)dmpprd;
-      float*  eleprf = (float*)eleprd;
+      float* sizprf = (float*)sizprd;
+      float* dmpprf = (float*)dmpprd;
+      float* eleprf = (float*)eleprd;
 
       for (int ii = 0; ii < numAtoms; ++ii) {
          double s, d, e;
@@ -460,7 +467,7 @@ void CudaCalcHippoChargeTransferForceKernel::initialize(
       vector<vector<int> > exclusions(numAtoms);
       for (int i = 0; i < numAtoms; i++) {
          vector<int> atoms;
-         set<int>    allAtoms;
+         set<int> allAtoms;
          allAtoms.insert(i);
 
          force.getCovalentMap(i, HippoChargeTransferForce::Covalent12, atoms);
@@ -494,8 +501,8 @@ void CudaCalcHippoChargeTransferForceKernel::initialize(
          int atom1 = covalentFlagValues[i].x;
          int atom2 = covalentFlagValues[i].y;
          int value = covalentFlagValues[i].z;
-         int f1    = (value == 0 || value == 1 ? 1 : 0);
-         int f2    = (value == 0 || value == 2 ? 1 : 0);
+         int f1 = (value == 0 || value == 1 ? 1 : 0);
+         int f2 = (value == 0 || value == 2 ? 1 : 0);
       }
 
       set<pair<int, int> > tilesWithExclusions;
@@ -503,14 +510,14 @@ void CudaCalcHippoChargeTransferForceKernel::initialize(
          int x = atom1 / CudaContext::TileSize;
          for (int j = 0; j < (int)exclusions[atom1].size(); ++j) {
             int atom2 = exclusions[atom1][j];
-            int y     = atom2 / CudaContext::TileSize;
+            int y = atom2 / CudaContext::TileSize;
             tilesWithExclusions.insert(make_pair(max(x, y), min(x, y)));
          }
       }
 
       // define macros for cuda source code
 
-      defines["TILE_SIZE"]  = cu.intToString(CudaContext::TileSize);
+      defines["TILE_SIZE"] = cu.intToString(CudaContext::TileSize);
       int numExclusionTiles = tilesWithExclusions.size();
       defines["NUM_TILES_WITH_EXCLUSIONS"] = cu.intToString(numExclusionTiles);
       int numContexts = cu.getPlatformData().contexts.size();
@@ -519,9 +526,9 @@ void CudaCalcHippoChargeTransferForceKernel::initialize(
       int endExclusionIndex
          = (cu.getContextIndex() + 1) * numExclusionTiles / numContexts;
       defines["FIRST_EXCLUSION_TILE"] = cu.intToString(startExclusionIndex);
-      defines["LAST_EXCLUSION_TILE"]  = cu.intToString(endExclusionIndex);
+      defines["LAST_EXCLUSION_TILE"] = cu.intToString(endExclusionIndex);
 
-      int    maxThreads = cu.getNonbondedUtilities().getForceThreadBlockSize();
+      int maxThreads = cu.getNonbondedUtilities().getForceThreadBlockSize();
       double energyAndForceMemory = 8.0 * elementSize + 2.0 * sizeof(int);
       energyAndForceThreads
          = min(maxThreads, cu.computeThreadBlockSize(energyAndForceMemory));
@@ -548,20 +555,23 @@ void CudaCalcHippoChargeTransferForceKernel::initialize(
          // kernels
          cmp_to_fmp_kernel = cu.getKernel(pmemodule, "cmp_to_fmp");
          grid_mpole_kernel = cu.getKernel(pmemodule, "grid_mpole");
+         grid_uind_kernel = cu.getKernel(pmemodule, "grid_uind");
          grid_convert_to_double_kernel
             = cu.getKernel(pmemodule, "grid_convert_to_double");
          pme_convolution_kernel = cu.getKernel(pmemodule, "pme_convolution");
-         fphi_mpole_kernel      = cu.getKernel(pmemodule, "fphi_mpole");
-         fphi_to_cphi_kernel    = cu.getKernel(pmemodule, "fphi_to_cphi");
+         fphi_mpole_kernel = cu.getKernel(pmemodule, "fphi_mpole");
+         fphi_uind_kernel = cu.getKernel(pmemodule, "fphi_uind");
+         fphi_to_cphi_kernel = cu.getKernel(pmemodule, "fphi_to_cphi");
+         ufield_recip_self_kernel
+            = cu.getKernel(pmemodule, "ufield_recip_self");
          cuFuncSetCacheConfig(grid_mpole_kernel, CU_FUNC_CACHE_PREFER_L1);
+         cuFuncSetCacheConfig(grid_uind_kernel, CU_FUNC_CACHE_PREFER_L1);
          cuFuncSetCacheConfig(fphi_mpole_kernel, CU_FUNC_CACHE_PREFER_L1);
+         cuFuncSetCacheConfig(fphi_uind_kernel, CU_FUNC_CACHE_PREFER_L1);
 
-         recip_mpole_energy_force_torque_kernel = cu.getKernel(pmemodule, "recip_mpole_energy_force_torque");
+         recip_mpole_energy_force_torque_kernel
+            = cu.getKernel(pmemodule, "recip_mpole_energy_force_torque");
          torque_to_force_kernel = cu.getKernel(pmemodule, "torque_to_force");
-         // cuFuncSetCacheConfig(pmeSpreadInducedDipolesKernel,
-         // CU_FUNC_CACHE_PREFER_L1); grid_uind
-         // cuFuncSetCacheConfig(pmeInducedPotentialKernel,
-         // CU_FUNC_CACHE_PREFER_L1); // fphi_uind
       }
 
       double cutoffDistanceForNBList = max(chgtrncutoff, repelcutoff);
@@ -592,7 +602,7 @@ void CudaCalcHippoChargeTransferForceKernel::initializeScaleFactors() {
    printf(
       " -- total number of exclusions tiles %d\n", (int)exclusionTiles.size());
    for (int i = 0; i < (int)exclusionTiles.size(); i++) {
-      ushort2 tile                                = exclusionTiles[i];
+      ushort2 tile = exclusionTiles[i];
       exclusionTileMap[make_pair(tile.x, tile.y)] = i;
    }
    covalentFlags.initialize<uint2>(
@@ -600,15 +610,15 @@ void CudaCalcHippoChargeTransferForceKernel::initializeScaleFactors() {
    vector<uint2> covalentFlagsVec(
       nb.getExclusions().getSize(), make_uint2(0, 0));
    for (int i = 0; i < (int)covalentFlagValues.size(); i++) {
-      int atom1   = covalentFlagValues[i].x;
-      int atom2   = covalentFlagValues[i].y;
-      int value   = covalentFlagValues[i].z;
-      int x       = atom1 / CudaContext::TileSize;
+      int atom1 = covalentFlagValues[i].x;
+      int atom2 = covalentFlagValues[i].y;
+      int value = covalentFlagValues[i].z;
+      int x = atom1 / CudaContext::TileSize;
       int offset1 = atom1 - x * CudaContext::TileSize;
-      int y       = atom2 / CudaContext::TileSize;
+      int y = atom2 / CudaContext::TileSize;
       int offset2 = atom2 - y * CudaContext::TileSize;
-      int f1      = (value == 0 || value == 1 ? 1 : 0);
-      int f2      = (value == 0 || value == 2 ? 1 : 0);
+      int f1 = (value == 0 || value == 1 ? 1 : 0);
+      int f2 = (value == 0 || value == 2 ? 1 : 0);
       if (x == y) {
          int index = exclusionTileMap[make_pair(x, y)] * CudaContext::TileSize;
          covalentFlagsVec[index + offset1].x |= f1 << offset2;
@@ -661,6 +671,21 @@ void CudaCalcHippoChargeTransferForceKernel::grid_mpole() {
    }
 }
 
+void CudaCalcHippoChargeTransferForceKernel::grid_uind() {
+   void* grid_uind_args[]
+      = {&cu.getPosq().getDevicePointer(), &inducedDipole.getDevicePointer(),
+         &inducedDipoleP.getDevicePointer(), &qgrid.getDevicePointer(),
+         cu.getPeriodicBoxVecXPointer(), cu.getPeriodicBoxVecYPointer(),
+         cu.getPeriodicBoxVecZPointer(), recipBoxVectorPointer[0],
+         recipBoxVectorPointer[1], recipBoxVectorPointer[2]};
+   cu.executeKernel(grid_uind_kernel, grid_uind_args, numAtoms);
+   if (useDoublePrecision) {
+      void* grid_convert_to_double_args[] = {&qgrid.getDevicePointer()};
+      cu.executeKernel(
+         grid_convert_to_double_kernel, grid_convert_to_double_args, numAtoms);
+   }
+}
+
 void CudaCalcHippoChargeTransferForceKernel::fftfront() {
    if (useDoublePrecision) {
       cufftExecZ2Z(fft, (double2*)qgrid.getDevicePointer(),
@@ -695,11 +720,21 @@ void CudaCalcHippoChargeTransferForceKernel::fphi_mpole() {
    void* fphi_mpole_args[] = {&qgrid.getDevicePointer(),
       &fphi.getDevicePointer(), &mpoleField.getDevicePointer(),
       &mpoleFieldP.getDevicePointer(), &cu.getPosq().getDevicePointer(),
-      &globalFrameDipoles.getDevicePointer(),
+      &globalFrameDipoles.getDevicePointer(), cu.getPeriodicBoxVecXPointer(),
+      cu.getPeriodicBoxVecYPointer(), cu.getPeriodicBoxVecZPointer(),
+      recipBoxVectorPointer[0], recipBoxVectorPointer[1],
+      recipBoxVectorPointer[2]};
+   cu.executeKernel(fphi_mpole_kernel, fphi_mpole_args, numAtoms);
+}
+
+void CudaCalcHippoChargeTransferForceKernel::fphi_uind() {
+   void* fphi_uind_args[] = {&qgrid.getDevicePointer(),
+      &phid.getDevicePointer(), &phip.getDevicePointer(),
+      &phidp.getDevicePointer(), &cu.getPosq().getDevicePointer(),
       cu.getPeriodicBoxVecXPointer(), cu.getPeriodicBoxVecYPointer(),
       cu.getPeriodicBoxVecZPointer(), recipBoxVectorPointer[0],
       recipBoxVectorPointer[1], recipBoxVectorPointer[2]};
-   cu.executeKernel(fphi_mpole_kernel, fphi_mpole_args, numAtoms);
+   cu.executeKernel(fphi_uind_kernel, fphi_uind_args, numAtoms);
 }
 
 void CudaCalcHippoChargeTransferForceKernel::fphi_to_cphi(CudaArray& phiarray) {
@@ -709,21 +744,51 @@ void CudaCalcHippoChargeTransferForceKernel::fphi_to_cphi(CudaArray& phiarray) {
    cu.executeKernel(fphi_to_cphi_kernel, fphi_to_cphi_args, numAtoms);
 }
 
+void CudaCalcHippoChargeTransferForceKernel::ufield_recip_self() {
+   void* args[] = {&phid.getDevicePointer(), &phip.getDevicePointer(),
+      &inducedField.getDevicePointer(), &inducedFieldP.getDevicePointer(),
+      &inducedDipole.getDevicePointer(), &inducedDipoleP.getDevicePointer(),
+      recipBoxVectorPointer[0], recipBoxVectorPointer[1],
+      recipBoxVectorPointer[2]};
+   cu.executeKernel(ufield_recip_self_kernel, args, numAtoms);
+}
+
 void CudaCalcHippoChargeTransferForceKernel::recip_mpole_energy_force_torque() {
-	void* recip_mpole_energy_force_torque_args[] = {
-		&cu.getPosq().getDevicePointer(), &cu.getForce().getDevicePointer(),
-		&torque.getDevicePointer(), &cu.getEnergyBuffer().getDevicePointer(),
-		&globalFrameDipoles.getDevicePointer(), &globalFrameQuadrupoles.getDevicePointer(),
-		&fracDipoles.getDevicePointer(), &fracQuadrupoles.getDevicePointer(),
-		&fphi.getDevicePointer(), &cphi.getDevicePointer(),
-		recipBoxVectorPointer[0], recipBoxVectorPointer[1], recipBoxVectorPointer[2]};
-	cu.executeKernel(recip_mpole_energy_force_torque_kernel, recip_mpole_energy_force_torque_args, numAtoms);
+   void* recip_mpole_energy_force_torque_args[]
+      = {&cu.getPosq().getDevicePointer(), &cu.getForce().getDevicePointer(),
+         &torque.getDevicePointer(), &cu.getEnergyBuffer().getDevicePointer(),
+         &globalFrameDipoles.getDevicePointer(),
+         &globalFrameQuadrupoles.getDevicePointer(),
+         &fracDipoles.getDevicePointer(), &fracQuadrupoles.getDevicePointer(),
+         &fphi.getDevicePointer(), &cphi.getDevicePointer(),
+         recipBoxVectorPointer[0], recipBoxVectorPointer[1],
+         recipBoxVectorPointer[2]};
+   cu.executeKernel(recip_mpole_energy_force_torque_kernel,
+      recip_mpole_energy_force_torque_args, numAtoms);
 }
 
 void CudaCalcHippoChargeTransferForceKernel::torque_to_force() {
-	void* torque_to_force_args[] = {&cu.getForce().getDevicePointer(), &torque.getDevicePointer(),
-		&cu.getPosq().getDevicePointer(), &axisInfo.getDevicePointer()};
-	cu.executeKernel(torque_to_force_kernel, torque_to_force_args, numAtoms);
+   void* torque_to_force_args[]
+      = {&cu.getForce().getDevicePointer(), &torque.getDevicePointer(),
+         &cu.getPosq().getDevicePointer(), &axisInfo.getDevicePointer()};
+   cu.executeKernel(torque_to_force_kernel, torque_to_force_args, numAtoms);
+}
+
+void CudaCalcHippoChargeTransferForceKernel::ufield() {
+   cu.clearBuffer(inducedField);
+   cu.clearBuffer(inducedFieldP);
+
+   // real space mutual field
+
+   // recip+self mutual field
+   cu.clearBuffer(qgrid);
+
+   grid_uind();
+   fftfront();
+   pme_convolution();
+   fftback();
+   fphi_uind();
+   ufield_recip_self();
 }
 
 double CudaCalcHippoChargeTransferForceKernel::execute(
@@ -738,10 +803,10 @@ double CudaCalcHippoChargeTransferForceKernel::execute(
 
       printf(" -- CT execute \n");
 
-      CudaNonbondedUtilities& nb             = cu.getNonbondedUtilities();
-      int                     startTileIndex = nb.getStartTileIndex();
-      int                     numTileIndices = nb.getNumTiles();
-      unsigned int            maxTiles = nb.getInteractingTiles().getSize();
+      CudaNonbondedUtilities& nb = cu.getNonbondedUtilities();
+      int startTileIndex = nb.getStartTileIndex();
+      int numTileIndices = nb.getNumTiles();
+      unsigned int maxTiles = nb.getInteractingTiles().getSize();
 
       void* argsEnergyAndForce[] = {&cu.getForce().getDevicePointer(),
          &cu.getEnergyBuffer().getDevicePointer(),
@@ -777,7 +842,7 @@ double CudaCalcHippoChargeTransferForceKernel::execute(
          cu.getPeriodicBoxVectors(boxVectors[0], boxVectors[1], boxVectors[2]);
          double determinant
             = boxVectors[0][0] * boxVectors[1][1] * boxVectors[2][2];
-         double  scale = 1.0 / determinant;
+         double scale = 1.0 / determinant;
          double3 recipBoxVectors[3];
          recipBoxVectors[0]
             = make_double3(boxVectors[1][1] * boxVectors[2][2] * scale, 0, 0);
@@ -800,7 +865,7 @@ double CudaCalcHippoChargeTransferForceKernel::execute(
                = make_float3((float)recipBoxVectors[0].x, 0, 0);
             recipBoxVectorsFloat[1] = make_float3(
                (float)recipBoxVectors[1].x, (float)recipBoxVectors[1].y, 0);
-            recipBoxVectorsFloat[2]  = make_float3((float)recipBoxVectors[2].x,
+            recipBoxVectorsFloat[2] = make_float3((float)recipBoxVectors[2].x,
                (float)recipBoxVectors[2].y, (float)recipBoxVectors[2].z);
             recipBoxVectorPointer[0] = &recipBoxVectorsFloat[0];
             recipBoxVectorPointer[1] = &recipBoxVectorsFloat[1];

@@ -18,46 +18,55 @@ private:
    void initializeScaleFactors();
 
    bool useDoublePrecision;
-   int  numAtoms, paddedNumAtoms;
-   int  energyAndForceThreads;
+   int numAtoms, paddedNumAtoms;
+   int energyAndForceThreads;
    bool hasInitializedScaleFactors;
    //
-   CudaContext&  cu;
+   CudaContext& cu;
    const System& system;
    // rotpole
    CUfunction rotpole_kernel;
-   void       rotpole();
+   void rotpole();
    // dipole and quadrupole
    CudaArray axisInfo; // x, y, z, and axis type
    CudaArray localFrameDipoles, localFrameQuadrupoles;
    CudaArray globalFrameDipoles, globalFrameQuadrupoles;
-   CudaArray mpoleField, mpoleFieldP, torque;
+   CudaArray inducedDipole, inducedDipoleP;
+   CudaArray mpoleField, mpoleFieldP;
+   CudaArray inducedField, inducedFieldP;
+   CudaArray torque;
+
    // PME
-   bool        hasInitializedFFT;
+   bool hasInitializedFFT;
    cufftHandle fft;
-   double      pmeCutoffDistance, ewaldAlpha, ewaldErrorTolerance;
-   int         pmeorder, nfft1, nfft2, nfft3;
-   void*       recipBoxVectorPointer[3];
-   CudaArray   qgrid, bsmod1, bsmod2, bsmod3;
-   CudaArray   fracDipoles, fracQuadrupoles;
-   CudaArray   fphi, cphi;
-   CudaArray   phid, phip, phidp;
+   double pmeCutoffDistance, ewaldAlpha, ewaldErrorTolerance;
+   int pmeorder, nfft1, nfft2, nfft3;
+   void* recipBoxVectorPointer[3];
+   CudaArray qgrid, bsmod1, bsmod2, bsmod3;
+   CudaArray fracDipoles, fracQuadrupoles;
+   CudaArray fphi, cphi;
+   CudaArray phid, phip, phidp;
    //
-   CUfunction cmp_to_fmp_kernel, grid_mpole_kernel,
+   CUfunction cmp_to_fmp_kernel, grid_mpole_kernel, grid_uind_kernel,
       grid_convert_to_double_kernel;
    CUfunction pme_convolution_kernel;
-   CUfunction fphi_mpole_kernel, fphi_to_cphi_kernel;
+   CUfunction fphi_mpole_kernel, fphi_uind_kernel, fphi_to_cphi_kernel,
+      ufield_recip_self_kernel;
    CUfunction recip_mpole_energy_force_torque_kernel;
    CUfunction torque_to_force_kernel;
-   void       cmp_to_fmp();
-   void       grid_mpole();
-   void       fftfront();
-   void       pme_convolution();
-   void       fftback();
-   void       fphi_mpole();
-   void       fphi_to_cphi(CudaArray& phiarray);
-   void       recip_mpole_energy_force_torque();
-   void       torque_to_force();
+   void cmp_to_fmp();
+   void grid_mpole();
+   void grid_uind();
+   void fftfront();
+   void pme_convolution();
+   void fftback();
+   void fphi_mpole();
+   void fphi_uind();
+   void fphi_to_cphi(CudaArray& phiarray);
+   void ufield_recip_self();
+   void recip_mpole_energy_force_torque();
+   void torque_to_force();
+   void ufield();
    // charge transfer
    CudaArray chgct, dmpct;
    // replusion
@@ -66,7 +75,7 @@ private:
    CudaArray pcore, pval, palpha;
 
    std::vector<int3> covalentFlagValues;
-   CudaArray         covalentFlags;
+   CudaArray covalentFlags;
 
    CUfunction energyAndForceKernel;
 };

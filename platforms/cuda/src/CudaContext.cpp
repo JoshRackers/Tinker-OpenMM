@@ -110,7 +110,6 @@ CudaContext::CudaContext(const System& system, int deviceIndex, bool useBlocking
         time(0.0), platformData(platformData), stepCount(0), computeForceCount(0), stepsSinceReorder(99999), contextIsValid(false), atomsWereReordered(false), hasCompilerKernel(false), isNvccAvailable(false),
         pinnedBuffer(NULL), posq(NULL), posqCorrection(NULL), velm(NULL), force(NULL), energyBuffer(NULL), energyParamDerivBuffer(NULL), atomIndexDevice(NULL), integration(NULL), expression(NULL), bonded(NULL), nonbonded(NULL), thread(NULL) {
     // Determine what compiler to use.
-    
     this->compiler = "\""+compiler+"\"";
     if (platformData.context != NULL) {
         try {
@@ -638,6 +637,11 @@ CUmodule CudaContext::createModule(const string source, const map<string, string
         int res = executeInWindows(command);
 #else
         string command = compiler+" --ptx --machine "+bits+" -arch=sm_"+gpuArchitecture+" -o \""+outputFile+"\" "+options+" \""+inputFile+"\" 2> \""+logFile+"\"";
+        //
+        string copycmd = "cp "+inputFile+" /user/roseane/Applications/tinker_omm_workspace/inter.cu";
+        res = std::system(copycmd.c_str());
+        printf(" compile %s\n", command.c_str());
+        //
         res = std::system(command.c_str());
 #endif
     }

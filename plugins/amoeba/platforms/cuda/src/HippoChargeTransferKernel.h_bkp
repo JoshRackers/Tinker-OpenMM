@@ -1,0 +1,44 @@
+class CudaCalcHippoChargeTransferForceKernel : public CalcHippoChargeTransferForceKernel {
+public:
+    CudaCalcHippoChargeTransferForceKernel(std::string name, const Platform& platform, CudaContext& cu, const System& system);
+
+    ~CudaCalcHippoChargeTransferForceKernel();
+
+    void initialize(const System& system, const HippoChargeTransferForce& force);
+
+    double execute(ContextImpl& context, bool includeForces, bool includeEnergy);
+
+    void copyParametersToContext(ContextImpl& context, const HippoChargeTransferForce& force);
+
+private:
+    class ForceInfo;
+    void initializeScaleFactors();
+
+    int energyAndForceThreads;
+    bool hasInitializedScaleFactors;
+    CudaContext& cu;
+    const System& system;
+    // dipole and quadrupole
+    CudaArray axisInfo; // x, y, z, and axis type
+    CudaArray localFrameDipoles;
+    CudaArray localFrameQuadrupoles;
+    CudaArray globalFrameDipoles;
+    CudaArray globalFrameQuadrupoles;
+    // charge transfer
+    CudaArray chgct, dmpct;
+    // replusion
+    CudaArray sizpr, dmppr, elepr;
+    // charge penetration electrostatics
+    CudaArray pcore, pval, palpha;
+    // torque
+    CudaArray* torque;
+    // kernels
+    std::vector<int3> covalentFlagValues;
+    CudaArray covalentFlags;
+
+    CUfunction energyAndForceKernel;
+
+    //
+    CUfunction rotpoleKernel; // Tinker rotpole subroutine
+    CUfunction mapTorqueKernel; // OpenMM torque mapping routine
+};

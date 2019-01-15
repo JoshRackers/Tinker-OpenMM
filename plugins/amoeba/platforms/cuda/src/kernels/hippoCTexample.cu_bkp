@@ -1,0 +1,915 @@
+typedef struct {
+    real3 pos, force, torque;
+    // charge transfer
+    real chgct, dmpct;
+    // repulsion
+    real sizpr, elepr, dmppr;
+    // multipoles
+    real charge;
+    real3 globalFrameDipoles;
+    real globalFrameQuadrupoles[5]; // xx, xy, xz, yy, yz
+} AtomData;
+
+inline __device__ void loadAtomData(AtomData& data, int atom, const real4* __restrict__ posq, const real* __restrict__ chgct, 
+    const real* __restrict__ dmpct,const real* __restrict__ sizpr,const real* __restrict__ elepr,const real* __restrict__ dmppr,
+    const real* __restrict__ globalFrameDipoles, const real* __restrict__ globalFrameQuadrupoles)
+{
+    real4 atomPosq = posq[atom];
+    data.pos = make_real3(atomPosq.x, atomPosq.y, atomPosq.z);
+    data.pos = data.pos;
+    // charge transfer
+    data.chgct = chgct[atom];
+    data.dmpct = dmpct[atom];
+    //repulsion
+    data.sizpr = sizpr[atom];
+    data.elepr = elepr[atom];
+    data.dmppr = dmppr[atom];
+    //multipoles
+    data.charge = atomPosq.w;
+    data.globalFrameDipoles.x      = globalFrameDipoles[3*atom];
+    data.globalFrameDipoles.y      = globalFrameDipoles[3*atom+1];
+    data.globalFrameDipoles.z      = globalFrameDipoles[3*atom+2];
+    data.globalFrameQuadrupoles[0] = globalFrameQuadrupoles[5*atom];
+    data.globalFrameQuadrupoles[1] = globalFrameQuadrupoles[5*atom+1];
+    data.globalFrameQuadrupoles[2] = globalFrameQuadrupoles[5*atom+2];
+    data.globalFrameQuadrupoles[3] = globalFrameQuadrupoles[5*atom+3];
+    data.globalFrameQuadrupoles[4] = globalFrameQuadrupoles[5*atom+4];
+}
+
+__device__ real computeCScaleFactor(uint2 covalent, int index)
+{
+    int mask = 1 << index;
+    bool x = (covalent.x & mask);
+    bool y = (covalent.y & mask);
+    return (x ? (y ? (real)CHARGETRANSFER13SCALE : (real)CHARGETRANSFER14SCALE) : (y ? (real)CHARGETRANSFER15SCALE : (real)1.0));
+}
+
+__device__ void computeOneCTInteraction(AtomData& atom1, AtomData& atom2, real cscale, real doubleCountingFactor, mixed& energyToBeAccumulated,
+    real4 periodicBoxSize, real4 invPeriodicBoxSize, real4 periodicBoxVecX, real4 periodicBoxVecY, real4 periodicBoxVecZ)
+{
+    // Compute the displacement.
+    // The displacement could be computed inside the loop and passed to each function
+    real3 delta;
+    delta.x = atom1.pos.x - atom2.pos.x;
+    delta.y = atom1.pos.y - atom2.pos.y;
+    delta.z = atom1.pos.z - atom2.pos.z;
+    APPLY_PERIODIC_TO_DELTA(delta);
+    real r2 = delta.x * delta.x + delta.y * delta.y + delta.z * delta.z;
+
+    if (r2 > CHGTRN_CUTOFF_SQUARED)
+        return;
+
+    real rInv = RSQRT(r2);
+    real r = r2 * rInv;
+
+    real dmpcti = atom1.dmpct;
+    real dmpctk = atom2.dmpct;
+    real transferi = atom1.chgct;
+    real transferk = atom2.chgct;
+    real exptermi = EXP(-dmpcti * r);
+    real exptermk = EXP(-dmpctk * r);
+    real energy = -transferi * exptermk - transferk * exptermi;
+
+    real de = transferi * dmpctk * exptermk + transferk * dmpcti * exptermi;
+
+#ifdef USE_CUTOFF
+    if (r > CHGTRN_TAPER) {
+        real x = r - CHGTRN_TAPER;
+        real taper = 1 + x * x * x * (CHGTRN_TAPER_C3 + x * (CHGTRN_TAPER_C4 + x * CHGTRN_TAPER_C5));
+        real dtaper = x * x * (3 * CHGTRN_TAPER_C3 + x * (4 * CHGTRN_TAPER_C4 + x * 5 * CHGTRN_TAPER_C5));
+        de = energy * dtaper + de * taper;
+        energy *= taper;
+    }
+#endif
+
+    energyToBeAccumulated += (mixed)doubleCountingFactor * cscale * energy;
+
+    real frcx = de * delta.x * rInv * cscale;
+    real frcy = de * delta.y * rInv * cscale;
+    real frcz = de * delta.z * rInv * cscale;
+    atom1.force -= make_real3(frcx, frcy, frcz);
+    if (doubleCountingFactor == 1) {
+        atom2.force += make_real3(frcx, frcy, frcz);
+    }
+}
+
+__device__ void computeOneRepelInteraction(AtomData& atom1, AtomData& atom2, real cscale, real doubleCountingFactor, mixed& energyToBeAccumulated,
+    real4 periodicBoxSize, real4 invPeriodicBoxSize, real4 periodicBoxVecX, real4 periodicBoxVecY, real4 periodicBoxVecZ) 
+{
+    // Compute the displacement.
+    // The displacement could be computed inside the loop and passed to each function
+    real3 delta;
+    delta.x = atom2.pos.x - atom1.pos.x;
+    delta.y = atom2.pos.y - atom1.pos.y;
+    delta.z = atom2.pos.z - atom1.pos.z;
+    APPLY_PERIODIC_TO_DELTA(delta);
+    real r2 = delta.x * delta.x + delta.y * delta.y + delta.z * delta.z;
+
+    if (r2 > REPEL_CUTOFF_SQUARED)
+        return;
+
+    real rInv = RSQRT(r2);
+    real r = r2 * rInv;
+
+    real xi   = atom1.pos.x;
+    real yi   = atom1.pos.y;
+    real zi   = atom1.pos.z;
+    real sizi = atom1.sizpr;
+    real dmpi = atom1.dmppr;
+    real vali = atom1.elepr;
+    real ci   = atom1.charge;
+    real dix  = atom1.globalFrameDipoles.x;
+    real diy  = atom1.globalFrameDipoles.y;
+    real diz  = atom1.globalFrameDipoles.z;
+    real qixx = atom1.globalFrameQuadrupoles[0]; // xx, xy, xz, yy, yz
+    real qixy = atom1.globalFrameQuadrupoles[1];
+    real qixz = atom1.globalFrameQuadrupoles[2];
+    real qiyy = atom1.globalFrameQuadrupoles[3];
+    real qiyz = atom1.globalFrameQuadrupoles[4];
+    real qizz = -(qixx+qiyy);
+    //printf("sizpr dmppr elepr %12.4f%12.4f%12.4f\n", sizi,dmpi,vali);
+    // usei = use(i) ?
+    // data for atom2 -- variables name matching erepel.f
+    real sizk = atom2.sizpr;
+    real dmpk = atom2.dmppr;
+    real valk = atom2.elepr;
+    real ck   = atom2.charge;
+    real dkx  = atom2.globalFrameDipoles.x;
+    real dky  = atom2.globalFrameDipoles.y;
+    real dkz  = atom2.globalFrameDipoles.z;
+    real qkxx = atom2.globalFrameQuadrupoles[0]; // xx, xy, xz, yy, yz
+    real qkxy = atom2.globalFrameQuadrupoles[1];
+    real qkxz = atom2.globalFrameQuadrupoles[2];
+    real qkyy = atom2.globalFrameQuadrupoles[3];
+    real qkyz = atom2.globalFrameQuadrupoles[4];
+    real qkzz = -(qkxx+qkyy);
+    //printf("%12.4e%12.4e%12.4e%12.4e%12.4e%12.4e\n", qixx,qixy,qixz,qiyy,qiyz,qizz);
+
+    // get reciprocal distance terms for this interaction
+    real rr3 = rInv / r2;
+    real rr5 = 3.0f * rr3 / r2;
+    real rr7 = 5.0f * rr5 / r2;
+    real rr9 = 7.0f * rr7 / r2;
+    real rr11 = 9.0f * rr9 / r2;
+
+    //
+    real xr = delta.x;
+    real yr = delta.y;
+    real zr = delta.z;
+    //printf("%12.4f%12.4f%12.4f%12.4f\n", xr,yr,zr,r);
+    //intermediates involving moments and distance separation
+    real dikx = diy*dkz - diz*dky;
+    real diky = diz*dkx - dix*dkz;
+    real dikz = dix*dky - diy*dkx;
+    real dirx = diy*zr - diz*yr;
+    real diry = diz*xr - dix*zr;
+    real dirz = dix*yr - diy*xr;
+    real dkrx = dky*zr - dkz*yr;
+    real dkry = dkz*xr - dkx*zr;
+    real dkrz = dkx*yr - dky*xr;
+    real dri = dix*xr + diy*yr + diz*zr;
+    real drk = dkx*xr + dky*yr + dkz*zr;
+    real dik = dix*dkx + diy*dky + diz*dkz;
+
+    real qrix = qixx*xr + qixy*yr + qixz*zr;
+    real qrkx = qkxx*xr + qkxy*yr + qkxz*zr;
+
+    real qriy = qixy*xr + qiyy*yr + qiyz*zr;
+    real qrky = qkxy*xr + qkyy*yr + qkyz*zr;
+
+    real qriz = qixz*xr + qiyz*yr + qizz*zr; 
+    real qrkz = qkxz*xr + qkyz*yr + qkzz*zr;
+
+    real qrri = qrix*xr + qriy*yr + qriz*zr;
+    real qrrk = qrkx*xr + qrky*yr + qrkz*zr;
+    real qrrik = qrix*qrkx + qriy*qrky + qriz*qrkz;
+    real qik = 2.0f*(qixy*qkxy+qixz*qkxz+qiyz*qkyz)+ qixx*qkxx + qiyy*qkyy + qizz*qkzz;
+    real qrixr = qriz*yr - qriy*zr;
+    real qriyr = qrix*zr - qriz*xr;
+    real qrizr = qriy*xr - qrix*yr;
+    real qrkxr = qrkz*yr - qrky*zr;
+    real qrkyr = qrkx*zr - qrkz*xr;
+    real qrkzr = qrky*xr - qrkx*yr;
+    real qrrx = qrky*qriz - qrkz*qriy;
+    real qrry = qrkz*qrix - qrkx*qriz;
+    real qrrz = qrkx*qriy - qrky*qrix;
+    real qikrx = qixx*qrkx + qixy*qrky + qixz*qrkz;
+    real qikry = qixy*qrkx + qiyy*qrky + qiyz*qrkz;
+    real qikrz = qixz*qrkx + qiyz*qrky + qizz*qrkz;
+    real qkirx = qkxx*qrix + qkxy*qriy + qkxz*qriz;
+    real qkiry = qkxy*qrix + qkyy*qriy + qkyz*qriz;
+    real qkirz = qkxz*qrix + qkyz*qriy + qkzz*qriz;
+    real qikrxr = qikrz*yr - qikry*zr;
+    real qikryr = qikrx*zr - qikrz*xr;
+    real qikrzr = qikry*xr - qikrx*yr;
+    real qkirxr = qkirz*yr - qkiry*zr;
+    real qkiryr = qkirx*zr - qkirz*xr;
+    real qkirzr = qkiry*xr - qkirx*yr;
+    real diqkx = dix*qkxx + diy*qkxy + diz*qkxz;
+    real diqky = dix*qkxy + diy*qkyy + diz*qkyz;
+    real diqkz = dix*qkxz + diy*qkyz + diz*qkzz;
+    real dkqix = dkx*qixx + dky*qixy + dkz*qixz;
+    real dkqiy = dkx*qixy + dky*qiyy + dkz*qiyz;
+    real dkqiz = dkx*qixz + dky*qiyz + dkz*qizz;
+
+    real diqrk = dix*qrkx + diy*qrky + diz*qrkz;
+    real dkqri = dkx*qrix + dky*qriy + dkz*qriz;
+
+    real diqkxr = diqkz*yr - diqky*zr;
+    real diqkyr = diqkx*zr - diqkz*xr;
+    real diqkzr = diqky*xr - diqkx*yr;
+    real dkqixr = dkqiz*yr - dkqiy*zr;
+    real dkqiyr = dkqix*zr - dkqiz*xr;
+    real dkqizr = dkqiy*xr - dkqix*yr;
+    real dqiqkx = diy*qrkz - diz*qrky + dky*qriz - dkz*qriy - 2.0f*(qixy*qkxz+qiyy*qkyz+qiyz*qkzz -qixz*qkxy-qiyz*qkyy)-qizz*qkyz; 
+    real dqiqky = diz*qrkx - dix*qrkz + dkz*qrix - dkx*qriz - 2.0f*(qixz*qkxx+qiyz*qkxy-qixx*qkxz-qixy*qkyz-qixz*qkzz+qizz*qkxz);             
+    real dqiqkz = dix*qrky - diy*qrkx + dkx*qriy - dky*qrix - 2.0f*(qixx*qkxy+qixy*qkyy+qixz*qkyz-qixy*qkxx-qiyy*qkxy-qiyz*qkxz);
+                    
+    // begin dumping function
+    real r3, r4, r5, r6, r7, r8;
+    real dmpi2, dampi, expi;
+    real dmpi22, dmpi23, dmpi24, dmpi25, dmpi26,dmpi27;
+    real pre, s, ds, d2s, d3s, d4s, d5s;
+    real dmpik[6]; 
+    if (dmpi == dmpk) {
+        r3 = r2 * r;
+        r4 = r3 * r;
+        r5 = r4 * r;
+        r6 = r5 * r;
+        r7 = r6 * r;
+        r8 = r7 * r;
+        dmpi2 = 0.5 * dmpi;
+        dampi = dmpi2 * r;
+        expi = EXP(-dampi);
+        dmpi22 = dmpi2 * dmpi2;
+        dmpi23 = dmpi22 * dmpi2;
+        dmpi24 = dmpi23 * dmpi2;
+        dmpi25 = dmpi24 * dmpi2;
+        dmpi26 = dmpi25 * dmpi2;
+        dmpi27 = dmpi2 * dmpi26;
+        pre = 128.0f;      
+        s = (r + dmpi2*r2 + dmpi22*r3/3.0f) * expi;
+        ds = (dmpi22*r3 + dmpi23*r4) * expi / 3.0f;
+        d2s = dmpi24 * expi * r5 / 9.0f;
+        d3s = dmpi25 * expi * r6 / 45.0f;
+        d4s = (dmpi25*r6 + dmpi26*r7) * expi / 315.0f;
+        d5s = (dmpi25*r6 + dmpi26*r7 + dmpi27*r8/3.0f)* expi / 945.0f;
+    } else 
+    {
+        // treat the case where alpha damping exponents are unequal
+        real dmpk2, dmpk22, dmpk23, dmpk24, dmpk25, dmpk26; 
+        real term, tmp, expk, dampk;
+        r3 = r2 * r;
+        r4 = r3 * r;
+        r5 = r4 * r;
+        r6 = r5 * r;
+        dmpi2 = 0.50f * dmpi;
+        dmpk2 = 0.50f * dmpk;
+        dampi = dmpi2 * r;
+        dampk = dmpk2 * r;
+        expi = EXP(-dampi);
+        expk = EXP(-dampk);
+        dmpi22 = dmpi2 * dmpi2;
+        dmpi23 = dmpi22 * dmpi2;
+        dmpi24 = dmpi23 * dmpi2;
+        dmpi25 = dmpi24 * dmpi2;
+        dmpi26 = dmpi25 * dmpi2;
+        dmpk22 = dmpk2 * dmpk2;
+        dmpk23 = dmpk22 * dmpk2;
+        dmpk24 = dmpk23 * dmpk2;
+        dmpk25 = dmpk24 * dmpk2;
+        dmpk26 = dmpk25 * dmpk2;
+        term = dmpi22 - dmpk22;
+        pre = (8192.0f * dmpi23 * dmpk23)/(term*term*term*term);
+        tmp = (4.0f * dmpi2 * dmpk2)/term;
+        s = (dampi-tmp)*expk + (dampk+tmp)*expi;
+        ds = (term*dmpk2*r2 - 4.0f*(dmpk22*r + dmpk2)) * dmpi2* expk/term
+                + (term*dmpi2*r2 + 4.0f*(dmpi22*r + dmpi2)) * dmpk2 * expi/term; //changed
+
+        d2s = (dmpk2*r2/3.0f + dmpk22*r3/3.0f - 4.0f/3.0f*dmpk23*r2/term
+                - 4.0f*dmpk22*r/term - 4.0f*dmpk2/term) * dmpi2 * expk
+                + ((dmpi2*r2 + dmpi22*r3)/3.0f + (4.0f/term)*(dmpi23*r2/3.0f
+                + dmpi22*r + dmpi2)) * dmpk2 * expi; //changed
+                
+        d3s = ((dmpk23*r4/3.0f + dmpk22*r3 + dmpk2*r2)/5.0f
+                + (4.0f/term)*(-dmpk24*r3/15.0f - (2.0f/5.0f)*dmpk23*r2
+                - dmpk22*r) - (4.0f/term)*dmpk2) * dmpi2 * expk 
+                + ((dmpi23*r4/3.0f + dmpi22*r3 + dmpi2*r2)/5.0f
+                + (4.0f/term)*(dmpi24*r3/15.0f + 2.0f*dmpi23*r2/5.0f
+                + dmpi22*r + dmpi2)) * dmpk2 * expi; //changed
+                
+        d4s = ((dmpk24*r5/15.0f + 2.0f/5.0f*dmpk23*r4 + dmpk22*r3 + dmpk2*r2)/7.0f
+                + (4.0f/term)*(-dmpk25*r4/105.0f - 2.0f/21.0f*dmpk24*r3
+                - 3.0f/7.0f*dmpk23*r2 - dmpk22*r - dmpk2)) * dmpi2 * expk
+                + ((dmpi24*r5/15.0f + 2.0f/5.0f*dmpi23*r4 + dmpi22*r3 + dmpi2*r2)/7.0f            
+                + (4.0f/term)*(dmpi25*r4/105.0f + 2.0f/21.0f*dmpi24*r3
+                + 3.0f/7.0f*dmpi23*r2 + dmpi22*r + dmpi2)) * dmpk2 * expi;
+            
+        d5s = (dmpk25*r6/945.0f + 2.0f/189.0f*dmpk24*r5 + dmpk23*r4/21.0f
+                + dmpk22*r3/9.0f + dmpk2*r2/9.0f
+                + (4.0f/term)*(-dmpk26*r5/945.0f - dmpk25*r4/63.0f - dmpk24*r3/9.0f
+                - 4.0f/9.0f*dmpk23*r2 - dmpk22*r - dmpk2)) * dmpi2 * expk
+                + (dmpi25*r6/945.0f + 2.0f/189.0f*dmpi24*r5
+                + dmpi23*r4/21.0f + dmpi22*r3/9.0f + dmpi2*r2/9.0f
+                + (4.0f/term)*(dmpi26*r5/945.0f + dmpi25*r4/63.0f + dmpi24*r3/9.0f
+                + 4.0f/9.0f*dmpi23*r2 + dmpi22*r + dmpi2)) * dmpk2 * expi;
+    }
+    // convert partial derivatives into full derivatives
+    s = s * rInv;
+    ds = ds * rr3;
+    d2s = d2s * rr5;
+    d3s = d3s * rr7;
+    d4s = d4s * rr9;
+    d5s = d5s * rr11;
+
+    // dmpik is a vector -- why (1),(3),(5) .. and not (1),(2),... 
+
+    //dmpik(1) == dmpik[0]
+    //dmpik(3) == dmpik[1]
+    //dmpik(5) == dmpik[2]
+    //dmpik(7) == dmpik[3]
+    //dmpik(9) == dmpik[4]
+    //dmpik(11) == dmpik[5]
+  
+    dmpik[0] = 0.50f * pre * s * s;  
+    dmpik[1] = pre * s * ds;
+    dmpik[2] = pre * (s*d2s + ds*ds);
+    dmpik[3] = pre * (s*d3s + 3.0f*ds*d2s);
+    dmpik[4] = pre * (s*d4s + 4.0f*ds*d3s + 3.0f*d2s*d2s);
+    dmpik[5] = pre * (s*d5s + 5.0f*ds*d4s + 10.0f*d2s*d3s);
+
+    // End of damping function
+
+    // compute the Pauli repulsion energy for this interaction
+    real term1, term2, term3, term4, term5, eterm;
+    real sizik, dterm, dterm1, dterm2, dterm3, dterm4, dterm5, dterm6;
+    term1 = vali*valk;
+    term2 = valk*dri - vali*drk + dik;
+    term3 = vali*qrrk + valk*qrri - dri*drk + 2.0f*(dkqri-diqrk+qik);
+    term4 = dri*qrrk - drk*qrri - 4.0f*qrrik;
+    term5 = qrri*qrrk;
+    eterm = term1*dmpik[0] + term2*dmpik[1] + term3*dmpik[2] + term4*dmpik[3] + term5*dmpik[4];
+    sizik = sizi * sizk * cscale;
+    real energy = sizik * eterm * rInv;
+    //print *,"Rep terms",eterm,rr1,dmpik(1)
+
+    //printf("Eterms ,%15.7e%15.7e%15.7e%15.7e%15.7e\n", term1*dmpik[0], term2*dmpik[1], 
+    //    term3*dmpik[2], term4*dmpik[3], term5*dmpik[4]);
+    //eterm is wrong -- review values of damping function and term1-5;
+
+    // calculate intermediate terms for force and torque
+    dterm = term1*dmpik[1] + term2*dmpik[2] + term3*dmpik[3] + term4*dmpik[4] + term5*dmpik[5];  
+    dterm1 = -valk*dmpik[1] + drk*dmpik[2] - qrrk*dmpik[3];
+    dterm2 = vali*dmpik[1] + dri*dmpik[2] + qrri*dmpik[3];   
+    dterm3 = 2.0f * dmpik[2];
+    dterm4 = 2.0f * (-valk*dmpik[2] + drk*dmpik[3] - qrrk*dmpik[4]);
+    dterm5 = 2.0f * (-vali*dmpik[2] - dri*dmpik[3] - qrri*dmpik[4]);
+    dterm6 = 4.0f * dmpik[3];
+
+    //dmpik(1) == dmpik[0]
+    //dmpik(3) == dmpik[1]
+    //dmpik(5) == dmpik[2]
+    //dmpik(7) == dmpik[3]
+    //dmpik(9) == dmpik[4]
+    //dmpik(11) == dmpik[5]
+    // compute the force components for this interaction
+    real frcx, frcy, frcz;
+    frcx = dterm*xr + dterm1*dix + dterm2*dkx
+                + dterm3*(diqkx-dkqix) + dterm4*qrix
+                + dterm5*qrkx + dterm6*(qikrx+qkirx);
+    frcy = dterm*yr + dterm1*diy + dterm2*dky
+                + dterm3*(diqky-dkqiy) + dterm4*qriy
+                + dterm5*qrky + dterm6*(qikry+qkiry);
+    frcz = dterm*zr + dterm1*diz + dterm2*dkz
+                + dterm3*(diqkz-dkqiz) + dterm4*qriz
+                + dterm5*qrkz + dterm6*(qikrz+qkirz);
+    frcx = frcx*rInv + eterm*rr3*xr;
+    frcy = frcy*rInv + eterm*rr3*yr;
+    frcz = frcz*rInv + eterm*rr3*zr;
+    frcx = sizik * frcx;
+    frcy = sizik * frcy;
+    frcz = sizik * frcz;
+
+    // compute the torque components for this interaction
+    real ttrix, ttriy, ttriz, ttrkx, ttrky, ttrkz; 
+    ttrix = -dmpik[1]*dikx + dterm1*dirx + dterm3*(dqiqkx+dkqixr) - dterm4*qrixr - dterm6*(qikrxr+qrrx);
+    ttriy = -dmpik[1]*diky + dterm1*diry + dterm3*(dqiqky+dkqiyr) - dterm4*qriyr - dterm6*(qikryr+qrry);       
+    ttriz = -dmpik[1]*dikz + dterm1*dirz + dterm3*(dqiqkz+dkqizr) - dterm4*qrizr - dterm6*(qikrzr+qrrz);
+    ttrkx = dmpik[1]*dikx + dterm2*dkrx - dterm3*(dqiqkx+diqkxr) - dterm5*qrkxr - dterm6*(qkirxr-qrrx);
+    ttrky = dmpik[1]*diky + dterm2*dkry - dterm3*(dqiqky+diqkyr) - dterm5*qrkyr - dterm6*(qkiryr-qrry);
+    ttrkz = dmpik[1]*dikz + dterm2*dkrz - dterm3*(dqiqkz+diqkzr) - dterm5*qrkzr - dterm6*(qkirzr-qrrz);
+    ttrix = sizik * ttrix * rInv;
+    ttriy = sizik * ttriy * rInv;
+    ttriz = sizik * ttriz * rInv;
+    ttrkx = sizik * ttrkx * rInv;
+    ttrky = sizik * ttrky * rInv;
+    ttrkz = sizik * ttrkz * rInv;
+#ifdef USE_CUTOFF
+    if (r > REPEL_TAPER) 
+    {
+        real x = r - REPEL_TAPER;
+        real taper = 1 + x * x * x * (REPEL_TAPER_C3 + x * (REPEL_TAPER_C4 + x * REPEL_TAPER_C5));
+        real dtaper = x * x * (3 * REPEL_TAPER_C3 + x * (4 * REPEL_TAPER_C4 + x * 5 * REPEL_TAPER_C5));
+        dtaper *= (energy * rInv);
+        frcx = frcx*taper - dtaper*xr;
+        frcy = frcy*taper - dtaper*yr;
+        frcz = frcz*taper - dtaper*zr;
+        ttrix *= taper;
+        ttriy *= taper;
+        ttriz *= taper;
+        ttrkx *= taper;
+        ttrky *= taper;
+        ttrkz *= taper;
+        energy = energy * taper;
+    }
+#endif
+    //printf("Fx Fy Fz %18.6e%18.6e%18.6e\n", frcx/41.84, frcy/41.84, frcz/41.84);
+
+    energyToBeAccumulated += (mixed)doubleCountingFactor * energy;
+
+    atom1.force -= make_real3(frcx, frcy, frcz);
+    atom1.torque += make_real3(ttrix, ttriy, ttriz);
+    // atom2.torque += make_real3(ttrkx, ttrky, ttrkz);
+    if (doubleCountingFactor == 1) 
+        atom2.force += make_real3(frcx, frcy, frcz);
+        atom2.torque += make_real3(ttrkx, ttrky, ttrkz);
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#define DEBUG_PRINT(AA2) { \
+    printf("atom c,d %12d%12.6f%12.6f%12.6f%12.6f\n" \
+           "q        %12.6f%12.6f%12.6f%12.6f%12.6f\n" \
+           "chg dmp  %12.6f%12.6f%12.6f\n" \
+           "fx fy xz %18.6e%18.6e%12.8e\n" \
+        ,AA2+1,(float)posq[AA2].w,(float)dpl[3*AA2],(float)dpl[3*AA2+1],(float)dpl[3*AA2+2] \
+        ,(float)quad[5*AA2],(float)quad[5*AA2+1],(float)quad[5*AA2+2],(float)quad[5*AA2+3],(float)quad[5*AA2+4] \
+        ,(float)sizpr[AA2],(float)dmppr[AA2],(float)elepr[AA2] \
+        ,(float)forceBuffers[3*AA2],(float)forceBuffers[3*AA2+1],(float)forceBuffers[3*AA2+2]); }
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+extern "C" __global__ void computeChargeTransfer(unsigned long long* __restrict__ forceBuffers, unsigned long long* __restrict__ torqueBuffers, mixed* __restrict__ energyBuffer,
+    const real4* __restrict__ posq, const uint2* __restrict__ covalentFlags, const ushort2* __restrict__ exclusionTiles, unsigned int startTileIndex,
+    unsigned int numTileIndices,
+#ifdef USE_CUTOFF
+    const int* __restrict__ tiles, const unsigned int* __restrict__ interactionCount, real4 periodicBoxSize, real4 invPeriodicBoxSize, real4 periodicBoxVecX,
+    real4 periodicBoxVecY, real4 periodicBoxVecZ, unsigned int maxTiles, const real4* __restrict__ blockCenter,
+    const unsigned int* __restrict__ interactingAtoms,
+#endif
+    const real* __restrict__ chgct, const real* __restrict__ dmpct
+    ,const real* __restrict__ dpl ,const real* __restrict__ quad
+    ,const real* __restrict__ sizpr ,const real* __restrict__ dmppr ,const real* __restrict__ elepr,
+    const real* __restrict__ globalFrameDipoles, const real* __restrict__ globalFrameQuadrupoles)
+{
+    const unsigned int totalWarps = (blockDim.x * gridDim.x) / TILE_SIZE;
+    const unsigned int warp = (blockIdx.x * blockDim.x + threadIdx.x) / TILE_SIZE;
+    const unsigned int tgx = threadIdx.x & (TILE_SIZE - 1);
+    const unsigned int tbx = threadIdx.x - tgx;
+    mixed energy = 0;
+    __shared__ AtomData localData[THREAD_BLOCK_SIZE];
+    __shared__ int atomIndices[THREAD_BLOCK_SIZE];
+    __shared__ volatile int skipTiles[THREAD_BLOCK_SIZE];
+
+    // First loop: process tiles that contain exclusions.
+
+    const unsigned int firstExclusionTile = FIRST_EXCLUSION_TILE + warp * (LAST_EXCLUSION_TILE - FIRST_EXCLUSION_TILE) / totalWarps;
+    const unsigned int lastExclusionTile = FIRST_EXCLUSION_TILE + (warp + 1) * (LAST_EXCLUSION_TILE - FIRST_EXCLUSION_TILE) / totalWarps;
+
+    for (int pos = firstExclusionTile; pos < lastExclusionTile; pos++) {
+        const ushort2 tileIndices = exclusionTiles[pos];
+        const unsigned int x = tileIndices.x;
+        const unsigned int y = tileIndices.y;
+        AtomData data;
+        unsigned int atom1 = x * TILE_SIZE + tgx;
+        printf("%12d%12.6f%12.6f%12.6f%12.6f%12.6f\n",atom1, globalFrameQuadrupoles[5*atom1],globalFrameQuadrupoles[5*atom1+1],
+            globalFrameQuadrupoles[5*atom1+2],globalFrameQuadrupoles[5*atom1+3],globalFrameQuadrupoles[5*atom1+4]);
+        
+        loadAtomData(data, atom1, posq, chgct, dmpct, sizpr, elepr, dmppr, globalFrameDipoles, globalFrameQuadrupoles);
+        data.force = make_real3(0);
+        data.torque = make_real3(0);
+        uint2 covalent = covalentFlags[pos * TILE_SIZE + tgx];
+
+        //printf("C0 Atm1 dip quad CT %6d%12.6f%12.6f%12.6f%12.6f%12.6f%12.6f%12.6f\n",
+        //                atom1+1,data.globalFrameDipoles.x,data.globalFrameDipoles.y,data.globalFrameDipoles.z,
+        //                data.globalFrameQuadrupoles[0],data.globalFrameQuadrupoles[1],data.globalFrameQuadrupoles[2],
+        //                data.globalFrameQuadrupoles[3],data.globalFrameQuadrupoles[4]);
+
+        if (x == y) {
+            // This tile is on the diagonal.
+            localData[threadIdx.x].pos = data.pos;
+            localData[threadIdx.x].dmpct = data.dmpct;
+            localData[threadIdx.x].chgct = data.chgct;
+            //repulsion
+            localData[threadIdx.x].sizpr = data.sizpr;
+            localData[threadIdx.x].elepr = data.elepr;
+            localData[threadIdx.x].dmppr = data.dmppr;
+            //multipoles
+            localData[threadIdx.x].charge = data.charge;
+            localData[threadIdx.x].globalFrameDipoles = data.globalFrameDipoles;
+            localData[threadIdx.x].globalFrameQuadrupoles[0] = data.globalFrameQuadrupoles[0];
+            localData[threadIdx.x].globalFrameQuadrupoles[1] = data.globalFrameQuadrupoles[1];
+            localData[threadIdx.x].globalFrameQuadrupoles[2] = data.globalFrameQuadrupoles[2];
+            localData[threadIdx.x].globalFrameQuadrupoles[3] = data.globalFrameQuadrupoles[3];
+            localData[threadIdx.x].globalFrameQuadrupoles[4] = data.globalFrameQuadrupoles[4];
+
+            for (unsigned int j = 0; j < TILE_SIZE; j++) {
+                int atom2 = y * TILE_SIZE + j;
+                //DEBUG_PRINT(atom2)
+                if (atom1 != atom2 && atom1 < NUM_ATOMS && atom2 < NUM_ATOMS) {
+                    real c = computeCScaleFactor(covalent, j);
+                    computeOneRepelInteraction(
+                        data, localData[tbx + j], c, (real)0.5, energy, periodicBoxSize, invPeriodicBoxSize, periodicBoxVecX, periodicBoxVecY, periodicBoxVecZ);
+                    computeOneCTInteraction(
+                        data, localData[tbx + j], c, (real)0.5, energy, periodicBoxSize, invPeriodicBoxSize, periodicBoxVecX, periodicBoxVecY, periodicBoxVecZ);
+                    //printf("C1 Atm1 Atm2 cscale E_CT %6d%6d%12.6f%12.6f\n",atom1+1,atom2+1,(float)c,(float)energy);
+                }
+            }
+            //printf("E_RP %12.6f\n",(float)energy);
+
+            // In this block we are double counting, so we only accumulate force on atom1
+
+            atomicAdd(&forceBuffers[atom1], static_cast<unsigned long long>((long long)(data.force.x * 0x100000000)));
+            atomicAdd(&forceBuffers[atom1 + PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long)(data.force.y * 0x100000000)));
+            atomicAdd(&forceBuffers[atom1 + 2 * PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long)(data.force.z * 0x100000000)));
+
+            atomicAdd(&torqueBuffers[atom1], static_cast<unsigned long long>((long long) (data.torque.x*0x100000000)));
+            atomicAdd(&torqueBuffers[atom1+PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long) (data.torque.y*0x100000000)));
+            atomicAdd(&torqueBuffers[atom1+2*PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long) (data.torque.z*0x100000000)));
+        } else {
+            // This is an off-diagonal tile.
+            unsigned int j = y * TILE_SIZE + tgx;
+            loadAtomData(localData[threadIdx.x], j, posq, chgct, dmpct, sizpr, elepr, dmppr, globalFrameDipoles,
+                globalFrameQuadrupoles);
+            
+            localData[threadIdx.x].force = make_real3(0);
+            localData[threadIdx.x].torque = make_real3(0);
+
+            unsigned int tj = tgx;
+            for (j = 0; j < TILE_SIZE; j++) {
+                int atom2 = y * TILE_SIZE + tj;
+                if (atom1 < NUM_ATOMS && atom2 < NUM_ATOMS) {
+                    float c = computeCScaleFactor(covalent, tj);
+                    computeOneCTInteraction(
+                        data, localData[tbx + tj], c, 1, energy, periodicBoxSize, invPeriodicBoxSize, periodicBoxVecX, periodicBoxVecY, periodicBoxVecZ);
+                    computeOneRepelInteraction(
+                        data, localData[tbx + tj], c, 1, energy, periodicBoxSize, invPeriodicBoxSize, periodicBoxVecX, periodicBoxVecY, periodicBoxVecZ);
+                }
+                tj = (tj + 1) & (TILE_SIZE - 1);
+            }
+            unsigned int offset = x * TILE_SIZE + tgx;
+
+            // In this block we are not double counting, so we accumulate on
+            // both atom1 and atom2
+
+            atomicAdd(&forceBuffers[offset], static_cast<unsigned long long>((long long)(data.force.x * 0x100000000)));
+            atomicAdd(&forceBuffers[offset + PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long)(data.force.y * 0x100000000)));
+            atomicAdd(&forceBuffers[offset + 2 * PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long)(data.force.z * 0x100000000)));
+            offset = y * TILE_SIZE + tgx;
+            atomicAdd(&torqueBuffers[atom1], static_cast<unsigned long long>((long long) (data.torque.x*0x100000000)));
+            atomicAdd(&torqueBuffers[atom1+PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long) (data.torque.y*0x100000000)));
+            atomicAdd(&torqueBuffers[atom1+2*PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long) (data.torque.z*0x100000000)));
+        }
+    //DEBUG_PRINT(atom1)
+    }
+    
+
+    // Second loop: tiles without exclusions, either from the neighbor list (with cutoff) or just enumerating all
+    // of them (no cutoff).
+
+#ifdef USE_CUTOFF
+    const unsigned int numTiles = interactionCount[0];
+    if (numTiles > maxTiles)
+        return; // There wasn't enough memory for the neighbor list.
+    int pos = (int)(numTiles > maxTiles ? startTileIndex + warp * (long long)numTileIndices / totalWarps : warp * (long long)numTiles / totalWarps);
+    int end = (int)(numTiles > maxTiles ? startTileIndex + (warp + 1) * (long long)numTileIndices / totalWarps : (warp + 1) * (long long)numTiles / totalWarps);
+#else
+    const unsigned int numTiles = numTileIndices;
+    int pos = (int)(startTileIndex + warp * (long long)numTiles / totalWarps);
+    int end = (int)(startTileIndex + (warp + 1) * (long long)numTiles / totalWarps);
+#endif
+    int skipBase = 0;
+    int currentSkipIndex = tbx;
+    skipTiles[threadIdx.x] = -1;
+
+    while (pos < end) 
+    {
+        bool includeTile = true;
+
+        // Extract the coordinates of this tile.
+
+        int x, y;
+#ifdef USE_CUTOFF
+        x = tiles[pos];
+#else
+        y = (int)floor(NUM_BLOCKS + 0.5f - SQRT((NUM_BLOCKS + 0.5f) * (NUM_BLOCKS + 0.5f) - 2 * pos));
+        x = (pos - y * NUM_BLOCKS + y * (y + 1) / 2);
+        if (x < y || x >= NUM_BLOCKS) { // Occasionally happens due to roundoff error.
+            y += (x < y ? -1 : 1);
+            x = (pos - y * NUM_BLOCKS + y * (y + 1) / 2);
+        }
+
+        // Skip over tiles that have exclusions, since they were already processed.
+
+        while (skipTiles[tbx + TILE_SIZE - 1] < pos) {
+            if (skipBase + tgx < NUM_TILES_WITH_EXCLUSIONS) {
+                ushort2 tile = exclusionTiles[skipBase + tgx];
+                skipTiles[threadIdx.x] = tile.x + tile.y * NUM_BLOCKS - tile.y * (tile.y + 1) / 2;
+            } else
+                skipTiles[threadIdx.x] = end;
+            skipBase += TILE_SIZE;
+            currentSkipIndex = tbx;
+        }
+        while (skipTiles[currentSkipIndex] < pos)
+            currentSkipIndex++;
+        includeTile = (skipTiles[currentSkipIndex] != pos);
+#endif
+
+        if (includeTile) {
+            unsigned int atom1 = x * TILE_SIZE + tgx;
+
+            // Load atom data for this tile.
+
+            AtomData data;
+            loadAtomData(data, atom1, posq, chgct, dmpct, sizpr, elepr, dmppr, globalFrameDipoles,
+                globalFrameQuadrupoles);
+            data.force = make_real3(0);
+            data.torque = make_real3(0);
+
+#ifdef USE_CUTOFF
+            unsigned int j = interactingAtoms[pos * TILE_SIZE + tgx];
+#else
+            unsigned int j = y * TILE_SIZE + tgx;
+#endif
+
+            atomIndices[threadIdx.x] = j;
+            loadAtomData(localData[threadIdx.x], j, posq, chgct, dmpct, sizpr, elepr, dmppr, globalFrameDipoles,
+                globalFrameQuadrupoles);
+            localData[threadIdx.x].force = make_real3(0);
+            localData[threadIdx.x].torque = make_real3(0);
+
+            // Compute forces.
+
+            unsigned int tj = tgx;
+            for (j = 0; j < TILE_SIZE; j++) {
+                int atom2 = atomIndices[tbx + tj];
+                if (atom1 < NUM_ATOMS && atom2 < NUM_ATOMS) {
+                    computeOneCTInteraction(
+                        data, localData[tbx + tj], 1, 1, energy, periodicBoxSize, invPeriodicBoxSize, periodicBoxVecX, periodicBoxVecY, periodicBoxVecZ);
+                    computeOneRepelInteraction(
+                        data, localData[tbx + tj], 1, 1, energy, periodicBoxSize, invPeriodicBoxSize, periodicBoxVecX, periodicBoxVecY, periodicBoxVecZ);
+                }
+                tj = (tj + 1) & (TILE_SIZE - 1);
+            }
+
+            // Write results.
+
+            unsigned int offset = x * TILE_SIZE + tgx;
+            atomicAdd(&forceBuffers[offset], static_cast<unsigned long long>((long long)(data.force.x * 0x100000000)));
+            atomicAdd(&forceBuffers[offset + PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long)(data.force.y * 0x100000000)));
+            atomicAdd(&forceBuffers[offset + 2 * PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long)(data.force.z * 0x100000000)));
+            atomicAdd(&torqueBuffers[offset], static_cast<unsigned long long>((long long) (data.torque.x*0x100000000)));
+            atomicAdd(&torqueBuffers[offset+PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long) (data.torque.y*0x100000000)));
+            atomicAdd(&torqueBuffers[offset+2*PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long) (data.torque.z*0x100000000)));
+
+
+#ifdef USE_CUTOFF
+            offset = atomIndices[threadIdx.x];
+#else
+            offset = y * TILE_SIZE + tgx;
+#endif
+
+            atomicAdd(&forceBuffers[offset], static_cast<unsigned long long>((long long)(localData[threadIdx.x].force.x * 0x100000000)));
+            atomicAdd(&forceBuffers[offset + PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long)(localData[threadIdx.x].force.y * 0x100000000)));
+            atomicAdd(&forceBuffers[offset + 2 * PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long)(localData[threadIdx.x].force.z * 0x100000000)));
+            atomicAdd(&torqueBuffers[offset], static_cast<unsigned long long>((long long) (data.torque.x*0x100000000)));
+            atomicAdd(&torqueBuffers[offset+PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long) (data.torque.y*0x100000000)));
+            atomicAdd(&torqueBuffers[offset+2*PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long) (data.torque.z*0x100000000)));
+        }
+        pos++;
+    }
+    energyBuffer[blockIdx.x * blockDim.x + threadIdx.x] += energy;
+}
+
+ inline __device__ real normVector(real3& v) {
+    real n = SQRT(dot(v, v));
+    v *= (n > 0 ? RECIP(n) : 0);
+    return n;
+}
+
+
+extern "C" __global__ void mapTorqueToForce(unsigned long long* __restrict__ forceBuffers, const long long* __restrict__ torqueBuffers,
+    const real4* __restrict__ posq, const int4* __restrict__ axisInfo) {
+const int U = 0;
+const int V = 1;
+const int W = 2;
+const int R = 3;
+const int S = 4;
+const int UV = 5;
+const int UW = 6;
+const int VW = 7;
+const int UR = 8;
+const int US = 9;
+const int VS = 10;
+const int WS = 11;
+const int LastVectorIndex = 12;
+
+const int X = 0;
+const int Y = 1;
+const int Z = 2;
+const int I = 3;
+
+const real torqueScale = RECIP((double) 0x100000000);
+
+real3 forces[4];
+real norms[LastVectorIndex];
+real3 vector[LastVectorIndex];
+real angles[LastVectorIndex][2];
+
+for (int atom = blockIdx.x*blockDim.x + threadIdx.x; atom < NUM_ATOMS; atom += gridDim.x*blockDim.x) {
+    int4 particles = axisInfo[atom];
+    int axisAtom = particles.z;
+    int axisType = particles.w;
+
+    // NoAxisType
+
+    if (axisType < 5 && particles.z >= 0) {
+        real3 atomPos = trimTo3(posq[atom]);
+        vector[U] = atomPos - trimTo3(posq[axisAtom]);
+        norms[U] = normVector(vector[U]);
+
+        // V is 2nd bond, or "random" vector not parallel to U
+
+        if (axisType != 4 && particles.x >= 0) {
+            vector[V] = atomPos - trimTo3(posq[particles.x]);
+        }
+        else {
+            vector[V].x = 1;
+            vector[V].y = 0;
+            vector[V].z = 0;
+            if (abs(vector[U].x/norms[U]) > 0.866) {
+                vector[V].x = 0;
+                vector[V].y = 1;
+            }
+        }
+        norms[V] = normVector(vector[V]);
+
+        // W = UxV
+
+        if (axisType < 2 || axisType > 3)
+            vector[W] = cross(vector[U], vector[V]);
+        else
+            vector[W] = atomPos - trimTo3(posq[particles.y]);
+        norms[W] = normVector(vector[W]);
+
+        vector[UV] = cross(vector[V], vector[U]);
+        vector[UW] = cross(vector[W], vector[U]);
+        vector[VW] = cross(vector[W], vector[V]);
+
+        norms[UV] = normVector(vector[UV]);
+        norms[UW] = normVector(vector[UW]);
+        norms[VW] = normVector(vector[VW]);
+
+        angles[UV][0] = dot(vector[U], vector[V]);
+        angles[UV][1] = SQRT(1 - angles[UV][0]*angles[UV][0]);
+
+        angles[UW][0] = dot(vector[U], vector[W]);
+        angles[UW][1] = SQRT(1 - angles[UW][0]*angles[UW][0]);
+
+        angles[VW][0] = dot(vector[V], vector[W]);
+        angles[VW][1] = SQRT(1 - angles[VW][0]*angles[VW][0]);
+
+        real dphi[3];
+        real3 torque = make_real3(torqueScale*torqueBuffers[atom], torqueScale*torqueBuffers[atom+PADDED_NUM_ATOMS], torqueScale*torqueBuffers[atom+PADDED_NUM_ATOMS*2]);
+        dphi[U] = -dot(vector[U], torque);
+        dphi[V] = -dot(vector[V], torque);
+        dphi[W] = -dot(vector[W], torque);
+
+        // z-then-x and bisector
+
+        if (axisType == 0 || axisType == 1) {
+            real factor1 = dphi[V]/(norms[U]*angles[UV][1]);
+            real factor2 = dphi[W]/(norms[U]);
+            real factor3 = -dphi[U]/(norms[V]*angles[UV][1]);
+            real factor4 = 0;
+            if (axisType == 1) {
+                factor2 *= 0.5f;
+                factor4 = 0.5f*dphi[W]/(norms[V]);
+            }
+            forces[Z] = vector[UV]*factor1 + factor2*vector[UW];
+            forces[X] = vector[UV]*factor3 + factor4*vector[VW];
+            forces[I] = -(forces[X]+forces[Z]);
+            forces[Y] = make_real3(0);
+        }
+        else if (axisType == 2) {
+            // z-bisect
+
+            vector[R] = vector[V] + vector[W];
+
+            vector[S] = cross(vector[U], vector[R]);
+
+            norms[R] = normVector(vector[R]);
+            norms[S] = normVector(vector[S]);
+
+            vector[UR] = cross(vector[R], vector[U]);
+            vector[US] = cross(vector[S], vector[U]);
+            vector[VS] = cross(vector[S], vector[V]);
+            vector[WS] = cross(vector[S], vector[W]);
+
+            norms[UR] = normVector(vector[UR]);
+            norms[US] = normVector(vector[US]);
+            norms[VS] = normVector(vector[VS]);
+            norms[WS] = normVector(vector[WS]);
+
+            angles[UR][0] = dot(vector[U], vector[R]);
+            angles[UR][1] = SQRT(1 - angles[UR][0]*angles[UR][0]);
+
+            angles[US][0] = dot(vector[U], vector[S]);
+            angles[US][1] = SQRT(1 - angles[US][0]*angles[US][0]);
+
+            angles[VS][0] = dot(vector[V], vector[S]);
+            angles[VS][1] = SQRT(1 - angles[VS][0]*angles[VS][0]);
+
+            angles[WS][0] = dot(vector[W], vector[S]);
+            angles[WS][1] = SQRT(1 - angles[WS][0]*angles[WS][0]);
+
+            real3 t1 = vector[V] - vector[S]*angles[VS][0];
+            real3 t2 = vector[W] - vector[S]*angles[WS][0];
+            normVector(t1);
+            normVector(t2);
+            real ut1cos = dot(vector[U], t1);
+            real ut1sin = SQRT(1 - ut1cos*ut1cos);
+            real ut2cos = dot(vector[U], t2);
+            real ut2sin = SQRT(1 - ut2cos*ut2cos);
+
+            real dphiR = -dot(vector[R], torque);
+            real dphiS = -dot(vector[S], torque);
+
+            real factor1 = dphiR/(norms[U]*angles[UR][1]);
+            real factor2 = dphiS/(norms[U]);
+            real factor3 = dphi[U]/(norms[V]*(ut1sin+ut2sin));
+            real factor4 = dphi[U]/(norms[W]*(ut1sin+ut2sin));
+            forces[Z] = vector[UR]*factor1 + factor2*vector[US];
+            forces[X] = (angles[VS][1]*vector[S] - angles[VS][0]*t1)*factor3;
+            forces[Y] = (angles[WS][1]*vector[S] - angles[WS][0]*t2)*factor4;
+            forces[I] = -(forces[X] + forces[Y] + forces[Z]);
+        }
+        else if (axisType == 3) {
+            // 3-fold
+
+            forces[Z] = (vector[UW]*dphi[W]/(norms[U]*angles[UW][1]) +
+                        vector[UV]*dphi[V]/(norms[U]*angles[UV][1]) -
+                        vector[UW]*dphi[U]/(norms[U]*angles[UW][1]) -
+                        vector[UV]*dphi[U]/(norms[U]*angles[UV][1]))/3;
+
+            forces[X] = (vector[VW]*dphi[W]/(norms[V]*angles[VW][1]) -
+                        vector[UV]*dphi[U]/(norms[V]*angles[UV][1]) -
+                        vector[VW]*dphi[V]/(norms[V]*angles[VW][1]) +
+                        vector[UV]*dphi[V]/(norms[V]*angles[UV][1]))/3;
+
+            forces[Y] = (-vector[UW]*dphi[U]/(norms[W]*angles[UW][1]) -
+                        vector[VW]*dphi[V]/(norms[W]*angles[VW][1]) +
+                        vector[UW]*dphi[W]/(norms[W]*angles[UW][1]) +
+                        vector[VW]*dphi[W]/(norms[W]*angles[VW][1]))/3;
+            forces[I] = -(forces[X] + forces[Y] + forces[Z]);
+        }
+        else if (axisType == 4) {
+            // z-only
+
+            forces[Z] = vector[UV]*dphi[V]/(norms[U]*angles[UV][1]) + vector[UW]*dphi[W]/norms[U];
+            forces[X] = make_real3(0);
+            forces[Y] = make_real3(0);
+            forces[I] = -forces[Z];
+        }
+        else {
+            forces[Z] = make_real3(0);
+            forces[X] = make_real3(0);
+            forces[Y] = make_real3(0);
+            forces[I] = make_real3(0);
+        }
+
+        //printf ("atom: %d forcesZ: %12.6f%12.6f%12.6f \n",atom,forces[Z].x,forces[Z].y,forces[Z].z);
+        //printf ("atom: %d forcesX: %12.6f%12.6f%12.6f \n",atom,forces[X].x,forces[X].y,forces[X].z);
+        //printf ("atom: %d forcesY: %12.6f%12.6f%12.6f \n",atom,forces[Y].x,forces[Y].y,forces[Y].z);
+
+
+
+        // Store results
+
+        atomicAdd(&forceBuffers[particles.z], static_cast<unsigned long long>((long long) (forces[Z].x*0x100000000)));
+        atomicAdd(&forceBuffers[particles.z+PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long) (forces[Z].y*0x100000000)));
+        atomicAdd(&forceBuffers[particles.z+2*PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long) (forces[Z].z*0x100000000)));
+        if (axisType != 4) {
+            atomicAdd(&forceBuffers[particles.x], static_cast<unsigned long long>((long long) (forces[X].x*0x100000000)));
+            atomicAdd(&forceBuffers[particles.x+PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long) (forces[X].y*0x100000000)));
+            atomicAdd(&forceBuffers[particles.x+2*PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long) (forces[X].z*0x100000000)));
+        }
+        if ((axisType == 2 || axisType == 3) && particles.y > -1) {
+            atomicAdd(&forceBuffers[particles.y], static_cast<unsigned long long>((long long) (forces[Y].x*0x100000000)));
+            atomicAdd(&forceBuffers[particles.y+PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long) (forces[Y].y*0x100000000)));
+            atomicAdd(&forceBuffers[particles.y+2*PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long) (forces[Y].z*0x100000000)));
+        }
+        atomicAdd(&forceBuffers[atom], static_cast<unsigned long long>((long long) (forces[I].x*0x100000000)));
+        atomicAdd(&forceBuffers[atom+PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long) (forces[I].y*0x100000000)));
+        atomicAdd(&forceBuffers[atom+2*PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long) (forces[I].z*0x100000000)));
+    }
+}
+}

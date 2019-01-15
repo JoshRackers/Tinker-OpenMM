@@ -938,6 +938,8 @@ CudaCalcAmoebaMultipoleForceKernel::~CudaCalcAmoebaMultipoleForceKernel() {
 }
 
 void CudaCalcAmoebaMultipoleForceKernel::initialize(const System& system, const AmoebaMultipoleForce& force) {
+
+    try {
     cu.setAsCurrent();
 
     // Initialize multipole parameters.
@@ -1395,6 +1397,9 @@ void CudaCalcAmoebaMultipoleForceKernel::initialize(const System& system, const 
     cu.getNonbondedUtilities().addInteraction(usePME, usePME, true, force.getCutoffDistance(), exclusions, "", force.getForceGroup());
     cu.getNonbondedUtilities().setUsePadding(false);
     cu.addForce(new ForceInfo(force));
+} catch(std::exception& e) {
+    printf(" amoeba multipole initialize exception : %s\n", e.what());
+}
 }
 
 void CudaCalcAmoebaMultipoleForceKernel::initializeScaleFactors() {
@@ -3102,3 +3107,6 @@ void CudaCalcAmoebaAngleTorsionForceKernel::copyParametersToContext(ContextImpl&
 	cu.invalidateMolecules();
 
 }
+
+#include "HippoChargeTransferKernel.cc"
+#include "HippoCPMultipoleRepulsionKernel.cc"

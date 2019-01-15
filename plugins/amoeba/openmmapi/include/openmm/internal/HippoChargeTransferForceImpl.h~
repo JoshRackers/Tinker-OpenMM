@@ -1,0 +1,54 @@
+#ifndef OPENMM_HIPPO_CHARGE_TRANSFER_FORCE_IMPL_H_
+#define OPENMM_HIPPO_CHARGE_TRANSFER_FORCE_IMPL_H_
+
+#include "openmm/internal/ForceImpl.h"
+#include "openmm/HippoChargeTransferForce.h"
+#include "openmm/Kernel.h"
+
+#include <string>
+
+namespace OpenMM {
+
+  class System;
+
+  class OPENMM_EXPORT_AMOEBA HippoChargeTransferForceImpl : public ForceImpl {
+  public:
+    HippoChargeTransferForceImpl(const HippoChargeTransferForce& iowner)
+      : owner(iowner) {}
+    ~HippoChargeTransferForceImpl() {}
+
+    void initialize(ContextImpl& context) {
+      kernel = context.getPlatform().createKernel(CalcHippoChargeTransferForceKernel::Name(), context);
+      kernel.getAs<CalcHippoChargeTransferForceKernel>().initialize(context.getSystem(), owner);
+    }
+
+    const HippoChargeTransferForce& getOwner() const {
+      return owner;
+    }
+
+    void updateContextState(ContextImpl& context) {}
+
+    double calcForcesAndEnergy(ContextImpl& context, bool includeForces, bool includeEnergy, int groups) {
+      if ((groups & (1 << owner.getForceGroup())) != 0)
+        return kernel.getAs<CalcHippoChargeTransferForceKernel>().execute(context, includeForces, includeEnergy);
+      return 0.0;
+    }
+
+    std::map<std::string, double>  getDefaultParameters() {
+      return std::map<std::string, double>(); // This force field doesn't define any parameters.
+    }
+
+    virtual std::vector<std::string> getKernelNames() {
+      std::vector<std::string> names;
+      names.push_back(CalcHippoChargeTransferForceKernel::Name());
+      return names;
+    }
+
+  private:
+    const HippoChargeTransferForce& owner;
+    Kernel kernel;    
+
+  };
+
+}
+#endif

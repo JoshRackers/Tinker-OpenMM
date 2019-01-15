@@ -1,3 +1,5 @@
+// test comment
+
 typedef struct {
     real3 pos, force, torque, field;
     // charge transfer

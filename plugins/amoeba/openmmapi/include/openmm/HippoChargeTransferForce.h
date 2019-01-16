@@ -181,6 +181,40 @@ public:
             multipoles[index].multipoleAtomY              = multipoleAtomY;
     }
 
+    // PME
+
+    bool getUsePME() const { return usePME; }
+
+    void setUsePME(bool ifUsePME) { usePME = ifUsePME; }
+
+    double getPMECutoffDistance() const { return pmeCutoffDistance; }
+
+    void setPMECutoffDistance(double distance) { pmeCutoffDistance = distance; }
+
+    void getPMEParameters(double &alpha, int &nx, int &ny, int &nz) const
+    {
+        alpha = ewaldAlpha;
+        nx = pmenx;
+        ny = pmeny;
+        nz = pmenz;
+    }
+
+    void setPMEParameters(double alpha, int nx, int ny, int nz)
+    {
+        ewaldAlpha = alpha;
+        pmenx = nx;
+        pmeny = ny;
+        pmenz = nz;
+    }
+
+    double getEwaldErrorTolerance() const { return ewaldErrorTolerance; }
+
+    void setEwaldErrorTolerance(double tol) { ewaldErrorTolerance = tol; }
+
+    int getPMEOrder() const { return pmeorder; }
+
+    void setPMEOrder(int order) { pmeorder = order; }
+
     // repulsion
 
     // std::vector<double> sizpr, dmppr, elepr;
@@ -326,6 +360,10 @@ protected:
         }
     };
     std::vector<MultipoleInfo> multipoles;
+
+    bool                       usePME;
+    double pmeCutoffDistance, ewaldAlpha, ewaldErrorTolerance;
+    int    pmeorder, pmenx, pmeny, pmenz;
 
     // charge transfer
     double ctTaperDistance, ctCutoffDistance;

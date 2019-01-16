@@ -1,4 +1,4 @@
-// test comment
+
 
 typedef struct {
     real3 pos, force, torque, field;
@@ -966,7 +966,9 @@ __device__ void computeOneDispersionInteraction(AtomData& atom1, AtomData& atom2
         ,(float)forceBuffers[3*AA2],(float)forceBuffers[3*AA2+1],(float)forceBuffers[3*AA2+2]); }
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-extern "C" __global__ void computeChargeTransfer(unsigned long long* __restrict__ forceBuffers, unsigned long long* __restrict__ torqueBuffers, mixed* __restrict__ energyBuffer,
+extern "C" __global__ void computeChargeTransfer(unsigned long long* __restrict__ forceBuffers, 
+    unsigned long long* __restrict__ torqueBuffers, 
+    mixed* __restrict__ energyBuffer,
     unsigned long long* __restrict__ fieldBuffers, const real4* __restrict__ posq, const uint2* __restrict__ covalentFlags, const ushort2* __restrict__ exclusionTiles, unsigned int startTileIndex,
     unsigned int numTileIndices,
 #ifdef USE_CUTOFF
@@ -981,6 +983,8 @@ extern "C" __global__ void computeChargeTransfer(unsigned long long* __restrict_
     ,const real* __restrict__ csix 
     )
 {
+    //printf ("DEEZ");
+
     const unsigned int totalWarps = (blockDim.x * gridDim.x) / TILE_SIZE;
     const unsigned int warp = (blockIdx.x * blockDim.x + threadIdx.x) / TILE_SIZE;
     const unsigned int tgx = threadIdx.x & (TILE_SIZE - 1);
@@ -1007,7 +1011,7 @@ extern "C" __global__ void computeChargeTransfer(unsigned long long* __restrict_
         data.field = make_real3(0);
         uint2 covalent = covalentFlags[pos * TILE_SIZE + tgx];
 
-        printf("atom = %d, csix = %12.4f\n", atom1+1, csix[atom1]);
+        //printf("atom = %d, csix = %12.4f\n", atom1+1, csix[atom1]);
 //        printf("atom = %d, pcore = %12.4f, palpha = %12.4f, dipole = %12.4f%12.4f%12.4f\n", atom1+1, data.pcore, data.palpha, data.dipole.x, data.dipole.y, data.dipole.z);
 
         if (x == y) {
@@ -1054,6 +1058,9 @@ extern "C" __global__ void computeChargeTransfer(unsigned long long* __restrict_
             //printf ("atom1 = %d torque: %12.6f%12.6f%12.6f\n",atom1+1,data.torque.x,data.torque.y,data.torque.z);
             //data.force *= EPSILON_FACTOR;
             //data.torque *= EPSILON_FACTOR;
+
+            //printf("bout to add to dem buffers, yo \n");
+
             atomicAdd(&forceBuffers[atom1], static_cast<unsigned long long>((long long)(data.force.x * 0x100000000)));
             atomicAdd(&forceBuffers[atom1 + PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long)(data.force.y * 0x100000000)));
             atomicAdd(&forceBuffers[atom1 + 2 * PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long)(data.force.z * 0x100000000)));
@@ -1065,6 +1072,10 @@ extern "C" __global__ void computeChargeTransfer(unsigned long long* __restrict_
             atomicAdd(&fieldBuffers[atom1], static_cast<unsigned long long>((long long) (data.field.x*0x100000000)));
             atomicAdd(&fieldBuffers[atom1+PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long) (data.field.y*0x100000000)));
             atomicAdd(&fieldBuffers[atom1+2*PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long) (data.field.z*0x100000000)));
+
+            printf ("nonPME forceBuffers for %d : %12.4f%12.4f%12.4f\n",atom1,forceBuffers[atom1],forceBuffers[atom1 + PADDED_NUM_ATOMS],forceBuffers[atom1+ 2*PADDED_NUM_ATOMS]);
+
+            //printf ("added to buffers \n");
 
             //printf ("field at atom: %d : %12.4f%12.4f%12.4f\n",atom1+1,data.field.x,data.field.y,data.field.z);
 
@@ -1261,7 +1272,14 @@ extern "C" __global__ void computeChargeTransfer(unsigned long long* __restrict_
     energyBuffer[blockIdx.x * blockDim.x + threadIdx.x] += energy;
 }
 
- inline __device__ real normVector(real3& v) {
+
+
+
+
+
+
+
+inline __device__ real normVector(real3& v) {
     real n = SQRT(dot(v, v));
     v *= (n > 0 ? RECIP(n) : 0);
     return n;
@@ -1269,7 +1287,11 @@ extern "C" __global__ void computeChargeTransfer(unsigned long long* __restrict_
 
 
 extern "C" __global__ void mapTorqueToForce(unsigned long long* __restrict__ forceBuffers, const long long* __restrict__ torqueBuffers,
-    const real4* __restrict__ posq, const int4* __restrict__ axisInfo) {
+    const real4* __restrict__ posq, const int4* __restrict__ axisInfo) 
+{
+
+//printf("Mapping Torques to forces\n");
+
 const int U = 0;
 const int V = 1;
 const int W = 2;
@@ -1485,3 +1507,4 @@ for (int atom = blockIdx.x*blockDim.x + threadIdx.x; atom < NUM_ATOMS; atom += g
     }
 }
 }
+

@@ -679,7 +679,7 @@ private:
 };
 
 #include "HippoChargeTransferKernel.h"
-#include "HippoCPMultipoleRepulsionKernel.h"
+//#include "HippoCPMultipoleRepulsionKernel.h"
 
 } // namespace OpenMM
 

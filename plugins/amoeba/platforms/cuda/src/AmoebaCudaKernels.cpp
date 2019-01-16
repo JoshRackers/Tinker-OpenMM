@@ -1336,12 +1336,12 @@ void CudaCalcAmoebaMultipoleForceKernel::initialize(const System& system, const 
 
             double eps = 1.0e-7;
             if (moduli[0] < eps)
-                moduli[0] = 0.9*moduli[1];
+                moduli[0] = 0.5*moduli[1];
             for (int i = 1; i < ndata-1; i++)
                 if (moduli[i] < eps)
-                    moduli[i] = 0.9*(moduli[i-1]+moduli[i+1]);
+                    moduli[i] = 0.5*(moduli[i-1]+moduli[i+1]);
             if (moduli[ndata-1] < eps)
-                moduli[ndata-1] = 0.9*moduli[ndata-2];
+                moduli[ndata-1] = 0.5*moduli[ndata-2];
 
             // Compute and apply the optimal zeta coefficient.
 
@@ -1593,7 +1593,7 @@ double CudaCalcAmoebaMultipoleForceKernel::execute(ContextImpl& context, bool in
             cufftExecC2C(fft, (float2*) pmeGrid->getDevicePointer(), (float2*) pmeGrid->getDevicePointer(), CUFFT_FORWARD);
         void* pmeConvolutionArgs[] = {&pmeGrid->getDevicePointer(), &pmeBsplineModuliX->getDevicePointer(), &pmeBsplineModuliY->getDevicePointer(),
             &pmeBsplineModuliZ->getDevicePointer(), cu.getPeriodicBoxSizePointer(), recipBoxVectorPointer[0], recipBoxVectorPointer[1], recipBoxVectorPointer[2]};
-        cu.executeKernel(pmeConvolutionKernel, pmeConvolutionArgs, gridSizeX*gridSizeY*gridSizeZ, 256);
+        cu.executeKernel(pmeConvolutionKernel, pmeConvolutionArgs, gridSizeX*gridSizeX*gridSizeX, 256);
         if (cu.getUseDoublePrecision())
             cufftExecZ2Z(fft, (double2*) pmeGrid->getDevicePointer(), (double2*) pmeGrid->getDevicePointer(), CUFFT_INVERSE);
         else
@@ -3111,4 +3111,3 @@ void CudaCalcAmoebaAngleTorsionForceKernel::copyParametersToContext(ContextImpl&
 }
 
 #include "HippoChargeTransferKernel.cc"
-#include "HippoCPMultipoleRepulsionKernel.cc"

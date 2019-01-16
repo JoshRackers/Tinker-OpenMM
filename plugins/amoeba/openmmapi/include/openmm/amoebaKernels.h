@@ -498,59 +498,59 @@ public:
 class CalcAmoebaStretchTorsionForceKernel : public KernelImpl {
 public:
 
-	static std::string Name() {
-		return "CalcAmoebaStretchTorsionForce";
-	}
+    static std::string Name() {
+        return "CalcAmoebaStretchTorsionForce";
+    }
 
-	CalcAmoebaStretchTorsionForceKernel(std::string name, const Platform& platform) : KernelImpl(name, platform) {
-	}
+    CalcAmoebaStretchTorsionForceKernel(std::string name, const Platform& platform) : KernelImpl(name, platform) {
+    }
 
-	virtual void initialize(const System& system, const AmoebaStretchTorsionForce& force) = 0;
-	virtual double execute(ContextImpl& context, bool includeForces, bool includeEnergy) = 0;
-	virtual void copyParametersToContext(ContextImpl& context, const AmoebaStretchTorsionForce& force) = 0;
+    virtual void initialize(const System& system, const AmoebaStretchTorsionForce& force) = 0;
+    virtual double execute(ContextImpl& context, bool includeForces, bool includeEnergy) = 0;
+    virtual void copyParametersToContext(ContextImpl& context, const AmoebaStretchTorsionForce& force) = 0;
 };
 
 class CalcAmoebaAngleTorsionForceKernel : public KernelImpl {
 public:
-	static std::string Name() {
-		return "CalcAmoebaAngleTorsionForce";
-	}
+    static std::string Name() {
+        return "CalcAmoebaAngleTorsionForce";
+    }
 
-	CalcAmoebaAngleTorsionForceKernel(std::string name, const Platform& platform) : KernelImpl(name, platform) {
-	}
+    CalcAmoebaAngleTorsionForceKernel(std::string name, const Platform& platform) : KernelImpl(name, platform) {
+    }
 
-	virtual void initialize(const System& system, const AmoebaAngleTorsionForce& force) = 0;
-	virtual double execute(ContextImpl& context, bool includeForces, bool includeEnergy) = 0;
-	virtual void copyParametersToContext(ContextImpl& context, const AmoebaAngleTorsionForce& force) = 0;
+    virtual void initialize(const System& system, const AmoebaAngleTorsionForce& force) = 0;
+    virtual double execute(ContextImpl& context, bool includeForces, bool includeEnergy) = 0;
+    virtual void copyParametersToContext(ContextImpl& context, const AmoebaAngleTorsionForce& force) = 0;
 };
 
 class CalcHippoChargeTransferForceKernel : public KernelImpl {
 public:
-        static std::string Name() {
-                return "CalcHippoChargeTransferForce";
-        }
+    static std::string Name() {
+        return "CalcHippoChargeTransferForce";
+    }
 
-        CalcHippoChargeTransferForceKernel(std::string name, const Platform& platform) : KernelImpl(name, platform) {
-        }
+    CalcHippoChargeTransferForceKernel(std::string name, const Platform& platform) : KernelImpl(name, platform) {
+    }
 
-        virtual void initialize(const System& system, const HippoChargeTransferForce& force) = 0;
-        virtual double execute(ContextImpl& context, bool includeForces, bool includeEnergy) = 0;
-        virtual void copyParametersToContext(ContextImpl& context, const HippoChargeTransferForce& force) = 0;
+    virtual void initialize(const System& system, const HippoChargeTransferForce& force) = 0;
+    virtual double execute(ContextImpl& context, bool includeForces, bool includeEnergy) = 0;
+    virtual void copyParametersToContext(ContextImpl& context, const HippoChargeTransferForce& force) = 0;
 };
 
-class CalcHippoCPMultipoleRepulsionForceKernel : public KernelImpl {
-public:
-        static std::string Name() {
-                return "CalcHippoCPMultipoleRepulsionForce";
-        }
-
-        CalcHippoCPMultipoleRepulsionForceKernel(std::string name, const Platform& platform) : KernelImpl(name, platform) {
-        }
-
-        virtual void initialize(const System& system, const HippoCPMultipoleRepulsionForce& force) = 0;
-        virtual double execute(ContextImpl& context, bool includeForces, bool includeEnergy) = 0;
-        virtual void copyParametersToContext(ContextImpl& context, const HippoCPMultipoleRepulsionForce& force) = 0;
-};
+//class CalcHippoCPMultipoleRepulsionForceKernel : public KernelImpl {
+//public:
+//        static std::string Name() {
+//                return "CalcHippoCPMultipoleRepulsionForce";
+//        }
+//
+//        CalcHippoCPMultipoleRepulsionForceKernel(std::string name, const Platform& platform) : KernelImpl(name, platform) {
+//        }
+//
+//        virtual void initialize(const System& system, const HippoCPMultipoleRepulsionForce& force) = 0;
+//        virtual double execute(ContextImpl& context, bool includeForces, bool includeEnergy) = 0;
+//        virtual void copyParametersToContext(ContextImpl& context, const HippoCPMultipoleRepulsionForce& force) = 0;
+//};
 } // namespace OpenMM
 
 #endif /*AMOEBA_OPENMM_KERNELS_H*/

@@ -1,5 +1,9 @@
-extern "C" __global__ void hippoRotpole(const real4* __restrict__ posq, const int4* __restrict__ axisInfo, const real* __restrict__ localFrameDipoles,
-    const real* __restrict__ localFrameQuadrupoles, real* __restrict__ globalFrameDipoles, real* __restrict__ globalFrameQuadrupoles)
+extern "C" __global__ void hippoRotpole(const real4* __restrict__ posq, 
+   const int4* __restrict__ axisInfo, 
+   const real* __restrict__ localFrameDipoles,
+   const real* __restrict__ localFrameQuadrupoles, 
+   real* __restrict__ globalFrameDipoles, 
+   real* __restrict__ globalFrameQuadrupoles)
 {
     /*
         Integers/Enums defined in OpenMM API:

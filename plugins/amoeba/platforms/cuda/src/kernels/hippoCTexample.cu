@@ -1097,7 +1097,7 @@ extern "C" __global__ void computeChargeTransfer(unsigned long long* __restrict_
                     computeOneInteraction(
                         data, localData[tbx + tj], c, 1, energy, periodicBoxSize, invPeriodicBoxSize, periodicBoxVecX, periodicBoxVecY, periodicBoxVecZ);
                     computeOneRepelInteraction(
-                        data, localData[tbx + tj], 1, 1, energy, periodicBoxSize, invPeriodicBoxSize, periodicBoxVecX, periodicBoxVecY, periodicBoxVecZ);
+                        data, localData[tbx + tj], c, 1, energy, periodicBoxSize, invPeriodicBoxSize, periodicBoxVecX, periodicBoxVecY, periodicBoxVecZ);
                     computeOneChargePenetrationInteraction( 
                         data, localData[tbx + tj], c, 1, energy, periodicBoxSize, invPeriodicBoxSize, periodicBoxVecX, periodicBoxVecY, periodicBoxVecZ);
                     computeOneDispersionInteraction(

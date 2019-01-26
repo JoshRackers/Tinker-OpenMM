@@ -270,27 +270,30 @@ public:
       multipoleCutoffDistance = distance;
     }
 
-    int addCPMultipoleSite(double inputCore, double inputVal, double inputAlpha)
+    int addCPMultipoleSite(double inputCore, double inputVal, double inputAlpha, double inputPolarity)
     {
       pcore.push_back(inputCore);
       pval.push_back(inputVal);
       palpha.push_back(inputAlpha);
+      polarity.push_back(inputPolarity);
 
       return pcore.size() - 1;
     }
 
-    void getCPMultipoleParameters(int index, double& outputCore, double& outputVal, double& outputAlpha) const
+    void getCPMultipoleParameters(int index, double& outputCore, double& outputVal, double& outputAlpha, double& outputPolarity) const
     {
       outputCore = pcore[index];
       outputVal = pval[index];
       outputAlpha = palpha[index];
+      outputPolarity = polarity[index];
     }
 
-    void setCPMultipoleParameters(int index, double inputCore, double inputVal, double inputAlpha)
+    void setCPMultipoleParameters(int index, double inputCore, double inputVal, double inputAlpha, double inputPolarity)
     {
       pcore[index] = inputCore;
       pval[index] = inputVal;
       palpha[index] = inputAlpha;
+      polarity[index] = inputPolarity;
     }
 
     //
@@ -380,7 +383,7 @@ protected:
 
     // charge penetration electrostatics
     double multipoleCutoffDistance;
-    std::vector<double> pcore,pval,palpha;
+    std::vector<double> pcore,pval,palpha,polarity;
 
     std::vector<std::vector<std::vector<int> > > covalentMaps;
 };

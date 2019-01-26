@@ -1,5 +1,4 @@
 
-
 typedef struct {
     real3 pos, force, torque, field;
     // charge transfer
@@ -17,6 +16,7 @@ typedef struct {
     // dispersion
     real csix;
 } AtomData;
+
 
 inline __device__ void loadAtomData(AtomData& data, int atom, const real4* __restrict__ posq, const real* __restrict__ chgct, const real* __restrict__ dmpct
     , const real* __restrict__ dpl, const real* __restrict__ quad
@@ -62,6 +62,39 @@ inline __device__ void loadAtomData(AtomData& data, int atom, const real4* __res
     // dispersion c6 parameter
     data.csix = csix[atom];
 }
+
+
+typedef struct {
+    real3 pos;
+
+    // induced dipoles
+    real3 inducedDipole;
+
+    // induced field
+    real3 inducedField;
+
+    // charge penetration electrostatics
+    real palpha;
+
+} InducedAtomData;
+
+
+inline __device__ void loadInducedAtomData(InducedAtomData& data, int atom, const real4* __restrict__ posq
+    , const real* __restrict__ dpl, const real* __restrict__ palpha)
+{
+    real4 atomPosq = posq[atom];
+    data.pos = make_real3(atomPosq.x, atomPosq.y, atomPosq.z);
+
+    data.inducedDipole.x = dpl[atom*3];
+    data.inducedDipole.y = dpl[atom*3+1];
+    data.inducedDipole.z = dpl[atom*3+2];    
+
+    // charge penetration damping parameter
+    data.palpha = palpha[atom]; 
+
+}
+
+
 
 __device__ real computeCScaleFactor(uint2 covalent, int index)
 {
@@ -155,7 +188,7 @@ __device__ void computeOneRepelInteraction(AtomData& atom1, AtomData& atom2, rea
     real qiyz = atom1.quadrupole[4];
     real qizz = -(qixx+qiyy);
 
-    printf("sizpr dmppr elepr %12.4f%12.4f%12.4f\n", sizi,dmpi,vali);
+    //printf("sizpr dmppr elepr %12.4f%12.4f%12.4f\n", sizi,dmpi,vali);
     // usei = use(i) ?
     // data for atom2 -- variables name matching erepel.f
     real sizk = atom2.sizpr;
@@ -451,7 +484,7 @@ __device__ void computeOneRepelInteraction(AtomData& atom1, AtomData& atom2, rea
         energy = energy * taper;
     }
 #endif
-    printf("Eterm Fy Fz E %18.6e%18.6e%18.6e%18.6e\n", eterm, frcy/41.84, frcz/41.84,energy);
+    //printf("Eterm Fy Fz E %18.6e%18.6e%18.6e%18.6e\n", eterm, frcy/41.84, frcz/41.84,energy);
 
     energyToBeAccumulated += (mixed)doubleCountingFactor * energy;
 
@@ -840,7 +873,6 @@ __device__ void computeOneChargePenetrationInteraction(AtomData& atom1, AtomData
     //printf ("ttmk %12.6f%12.6f%12.6f%12.6f\n",ck,ttmk[0],ttmk[1],ttmk[2]);
     
 
-
     atom1.force -= make_real3(frcx, frcy, frcz) * EPSILON_FACTOR;
     if (doubleCountingFactor == 1) {
         atom2.force += make_real3(frcx, frcy, frcz) * EPSILON_FACTOR;
@@ -850,6 +882,8 @@ __device__ void computeOneChargePenetrationInteraction(AtomData& atom1, AtomData
     if (doubleCountingFactor == 1) {
         atom2.torque += make_real3(ttmk[0],ttmk[1],ttmk[2]) * EPSILON_FACTOR;
     }
+
+    //printf("field from %12.4f: %12.4f%12.4f%12.4f\n",r,fieldix,fieldiy,fieldiz);
 
     atom1.field += make_real3(fieldix, fieldiy, fieldiz);
     if (doubleCountingFactor == 1) {
@@ -876,7 +910,7 @@ __device__ void computeOneDispersionInteraction(AtomData& atom1, AtomData& atom2
     real r = r2 * rInv;   
     real r6 = r2*r2*r2; 
 
-    printf ("cutoff: %12.4f, taper: %12.4f, r = %12.4f\n ",DISP_CUTOFF_SQUARED, DISP_TAPER, r);
+    //printf ("cutoff: %12.4f, taper: %12.4f, r = %12.4f\n ",DISP_CUTOFF_SQUARED, DISP_TAPER, r);
 
 
     real ci = atom1.csix;
@@ -930,7 +964,7 @@ __device__ void computeOneDispersionInteraction(AtomData& atom1, AtomData& atom2
 
     real energy = e*damp2*cscale;
 
-    printf ("energy = %12.4f and cscale = %12.4f\n", energy, cscale);
+    //printf ("energy = %12.4f and cscale = %12.4f\n", energy, cscale);
 
     if (r > DISP_TAPER) {
         real x = r - DISP_TAPER;
@@ -1073,7 +1107,7 @@ extern "C" __global__ void computeChargeTransfer(unsigned long long* __restrict_
             atomicAdd(&fieldBuffers[atom1+PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long) (data.field.y*0x100000000)));
             atomicAdd(&fieldBuffers[atom1+2*PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long) (data.field.z*0x100000000)));
 
-            printf ("nonPME forceBuffers for %d : %12.4f%12.4f%12.4f\n",atom1,forceBuffers[atom1],forceBuffers[atom1 + PADDED_NUM_ATOMS],forceBuffers[atom1+ 2*PADDED_NUM_ATOMS]);
+            //printf ("nonPME forceBuffers for %d : %12.4f%12.4f%12.4f\n",atom1,forceBuffers[atom1],forceBuffers[atom1 + PADDED_NUM_ATOMS],forceBuffers[atom1+ 2*PADDED_NUM_ATOMS]);
 
             //printf ("added to buffers \n");
 
@@ -1104,7 +1138,7 @@ extern "C" __global__ void computeChargeTransfer(unsigned long long* __restrict_
                         data, localData[tbx + tj], c, 1, energy, periodicBoxSize, invPeriodicBoxSize, periodicBoxVecX, periodicBoxVecY, periodicBoxVecZ);
     
                 }
-                printf(" x != y atom = %d atom = %d, pcore %12.4f, palpha %12.4f\n", atom1+1, atom2+1, pcore[atom1], palpha[atom1]);
+                //printf(" x != y atom = %d atom = %d, pcore %12.4f, palpha %12.4f\n", atom1+1, atom2+1, pcore[atom1], palpha[atom1]);
                 tj = (tj + 1) & (TILE_SIZE - 1);
             }
             unsigned int offset = x * TILE_SIZE + tgx;
@@ -1508,3 +1542,379 @@ for (int atom = blockIdx.x*blockDim.x + threadIdx.x; atom < NUM_ATOMS; atom += g
 }
 }
 
+
+
+
+
+__device__ void computeOneInducedInteraction(InducedAtomData& atom1, InducedAtomData& atom2, real cscale, real doubleCountingFactor, mixed& energyToBeAccumulated,
+    real4 periodicBoxSize, real4 invPeriodicBoxSize, real4 periodicBoxVecX, real4 periodicBoxVecY, real4 periodicBoxVecZ)
+{
+    // Compute the displacement.
+
+    real3 delta;
+    delta.x = atom2.pos.x - atom1.pos.x;
+    delta.y = atom2.pos.y - atom1.pos.y;
+    delta.z = atom2.pos.z - atom1.pos.z;
+    APPLY_PERIODIC_TO_DELTA(delta)
+    real r2 = delta.x * delta.x + delta.y * delta.y + delta.z * delta.z;
+
+ //   printf(" device %12.4f\n",100*CHGPEN_CUTOFF_SQUARED);
+
+    if (r2 > CHGPEN_CUTOFF_SQUARED)
+        return;
+
+    real rInv = RSQRT(r2);
+    real r = r2 * rInv;
+
+    real xr = delta.x;
+    real yr = delta.y;
+    real zr = delta.z;
+
+// copy in pair interaction from umutual2a
+
+    real rr1 = 1.0f / r ;
+    real rr2 = rr1 * rr1;
+    real rr3 = rr2 * rr1;
+    real rr5 = rr2 * rr3;
+
+    real dix = atom1.inducedDipole.x;
+    real diy = atom1.inducedDipole.y;
+    real diz = atom1.inducedDipole.z;
+    
+    real dkx = atom2.inducedDipole.x;
+    real dky = atom2.inducedDipole.y;
+    real dkz = atom2.inducedDipole.z;
+
+    printf("dpl is %12.4f%12.4f%12.4f\n",dix,diy,diz);
+
+    real alphai = atom1.palpha;
+    real alphak = atom2.palpha;
+
+    real dir = dix*xr + diy*yr + diz*zr;
+    real dkr = dkx*xr + dky*yr + dkz*zr;
+
+    // calculate the real space Ewald error function terms
+
+    real ralpha = EWALD_ALPHA*r;
+    real exp2a = EXP(-ralpha*ralpha);
+    
+    // This approximation for erfc is from Abramowitz and Stegun (1964) p. 299.  They cite the following as
+    // the original source: C. Hastings, Jr., Approximations for Digital Computers (1955).  It has a maximum
+    // error of 1.5e-7.
+    const real t = RECIP(1.0f+0.3275911f*ralpha);
+    const real erfAlphaR = 1-(0.254829592f+(-0.284496736f+(1.421413741f+(-1.453152027f+1.061405429f*t)*t)*t)*t)*t*exp2a;
+     
+    real bn[3];
+    bn[0] = (1 - erfAlphaR)/r;
+    real alsq2 = 2*EWALD_ALPHA*EWALD_ALPHA;
+    real alsq2n = 1.0f / (SQRT_PI*EWALD_ALPHA);
+    real bfac = 0.0f;
+    for (int i = 1; i < 3; ++i){
+        bfac = (float) (i+i-1);
+        alsq2n = alsq2*alsq2n;
+        bn[i] = (bfac*bn[i-1]+alsq2n*exp2a) / r2;
+    }
+
+    real dampi = alphai*r;
+    real dampk = alphak*r;
+    real expi = EXP(-dampi);
+    real expk = EXP(-dampk);
+
+    real dampi2 = dampi*dampi;
+    real dampi3 = dampi2*dampi;
+    real dampi4 = dampi3*dampi;
+    real dampi5 = dampi4*dampi;
+
+    real dampk2 = dampk*dampk;
+    real dampk3 = dampk2*dampk;
+    real dampk4 = dampk3*dampk;
+    real dampk5 = dampk4*dampk;
+
+    real dmpik3;
+    real dmpik5;
+
+    if (alphai == alphak){
+        dmpik3 = 1  - (1 + dampi + 0.5f*dampi2 + 7*dampi3/48.0f + dampi4/48.0f)*expi;
+        dmpik5 = 1  - (1 + dampi + 0.5f*dampi2 + dampi3/6.0f + dampi4/24.0f + dampi5/144.0f)*expi;
+    } else {
+        real alphai2 = alphai*alphai;
+        real alphak2 = alphak*alphak;
+        real termi = alphak2 / (alphak2 - alphai2);
+        real termk = alphai2 / (alphai2 - alphak2);
+        real termi2 = termi * termi;
+        real termk2 = termk * termk;
+        dmpik3 = 1 - termi2*(1+dampi+0.5f*dampi2)*expi
+                   - termk2*(1+dampk+0.5f*dampk2)*expk
+                   - 2*termi2*termk*(1+dampi)*expi
+                   - 2*termk2*termi*(1+dampk)*expk;
+        dmpik5 = 1 - termi2*(1 + dampi + 0.5f*dampi2 + dampi3/6.0f)*expi
+                   - termk2*(1 + dampk + 0.5f*dampk2 + dampk3/6.0f)*expk
+                   - 2*termi2*termk*(1.0 + dampi + dampi2/3.0f)*expi
+                   - 2*termk2*termi*(1.0 + dampk + dampk2/3.0f)*expk;
+
+    }
+
+
+    //real scale3 = wscale(k) * dmpik(3)
+    //real scale5 = wscale(k) * dmpik(5)
+
+    real scale3 = 1 * dmpik3;
+    real scale5 = 1 * dmpik5;
+
+    rr3 = -bn[1] + (1-scale3)*rr3;
+    rr5 = bn[2] - 3*(1-scale5)*rr5;
+    real fieldix = rr3*dkx + rr5*dkr*xr;
+    real fieldiy = rr3*dky + rr5*dkr*yr;
+    real fieldiz = rr3*dkz + rr5*dkr*zr;
+    real fieldkx = rr3*dix + rr5*dir*xr;
+    real fieldky = rr3*diy + rr5*dir*yr;
+    real fieldkz = rr3*diz + rr5*dir*zr;
+
+    atom1.inducedField += make_real3(fieldix, fieldiy, fieldiz);
+    if (doubleCountingFactor == 1) {
+        atom2.inducedField += make_real3(fieldkx, fieldky, fieldkz);
+    }
+}
+
+
+
+
+
+
+
+extern "C" __global__ void ufieldReal(
+    unsigned long long* __restrict__ inducedFieldBuffers, 
+    const real4* __restrict__ posq, const uint2* __restrict__ covalentFlags, const ushort2* __restrict__ exclusionTiles, unsigned int startTileIndex,
+    unsigned int numTileIndices,
+#ifdef USE_CUTOFF
+    const int* __restrict__ tiles, const unsigned int* __restrict__ interactionCount, real4 periodicBoxSize, real4 invPeriodicBoxSize, real4 periodicBoxVecX,
+    real4 periodicBoxVecY, real4 periodicBoxVecZ, unsigned int maxTiles, const real4* __restrict__ blockCenter,
+    const unsigned int* __restrict__ interactingAtoms
+#endif
+    ,const real* __restrict__ dpl , const real* __restrict__ palpha
+    )
+{
+
+    const unsigned int totalWarps = (blockDim.x * gridDim.x) / TILE_SIZE;
+    const unsigned int warp = (blockIdx.x * blockDim.x + threadIdx.x) / TILE_SIZE;
+    const unsigned int tgx = threadIdx.x & (TILE_SIZE - 1);
+    const unsigned int tbx = threadIdx.x - tgx;
+    mixed energy = 0;
+    __shared__ InducedAtomData localData[THREAD_BLOCK_SIZE];
+    __shared__ int atomIndices[THREAD_BLOCK_SIZE];
+    __shared__ volatile int skipTiles[THREAD_BLOCK_SIZE];
+
+    // First loop: process tiles that contain exclusions.
+
+    const unsigned int firstExclusionTile = FIRST_EXCLUSION_TILE + warp * (LAST_EXCLUSION_TILE - FIRST_EXCLUSION_TILE) / totalWarps;
+    const unsigned int lastExclusionTile = FIRST_EXCLUSION_TILE + (warp + 1) * (LAST_EXCLUSION_TILE - FIRST_EXCLUSION_TILE) / totalWarps;
+
+    for (int pos = firstExclusionTile; pos < lastExclusionTile; pos++) {
+        const ushort2 tileIndices = exclusionTiles[pos];
+        const unsigned int x = tileIndices.x;
+        const unsigned int y = tileIndices.y;
+        InducedAtomData data;
+        unsigned int atom1 = x * TILE_SIZE + tgx;
+        loadInducedAtomData(data, atom1, posq, dpl, palpha);
+        data.inducedField = make_real3(0);
+        uint2 covalent = covalentFlags[pos * TILE_SIZE + tgx];
+
+        printf("atom = %d, ind dipole = %12.4f%12.4f%12.4f\n", atom1+1, dpl[3*atom1],dpl[3*atom1+1],dpl[3*atom1+2]);
+//        printf("atom = %d, pcore = %12.4f, palpha = %12.4f, dipole = %12.4f%12.4f%12.4f\n", atom1+1, data.pcore, data.palpha, data.dipole.x, data.dipole.y, data.dipole.z);
+
+        if (x == y) {
+            // This tile is on the diagonal.
+            localData[threadIdx.x].pos = data.pos;
+            localData[threadIdx.x].inducedDipole = data.inducedDipole;
+            localData[threadIdx.x].palpha = data.palpha;
+
+            for (unsigned int j = 0; j < TILE_SIZE; j++) {
+                int atom2 = y * TILE_SIZE + j;
+                if (atom1 != atom2 && atom1 < NUM_ATOMS && atom2 < NUM_ATOMS) {
+                    real c = computeCScaleFactor(covalent, j);
+                    computeOneInducedInteraction(
+                        data, localData[tbx + j], c, (real)0.5, energy, periodicBoxSize, invPeriodicBoxSize, periodicBoxVecX, periodicBoxVecY, periodicBoxVecZ);
+                     //printf (" x==y atom = %d atom = %d, energy = %12.4f, palphas: %12.4f%12.4f\n", atom1+1, atom2+1, energy, palpha[atom1], palpha[atom2]);
+
+                }  
+//                printf ("i = %d k = %d torque: %12.6f%12.6f%12.6f\n", atom1+1,atom2+1, data.torque); 
+//                printf(" x == y atom = %d atom = %d, pcore %12.4f, palpha %12.4f, energy %12.4f\n", atom1+1, atom2+1, pcore[atom1], palpha[atom1], energy);
+            }
+
+            // In this block we are double counting, so we only accumulate force on atom1
+
+            //printf ("atom1 = %d torque: %12.6f%12.6f%12.6f\n",atom1+1,data.torque.x,data.torque.y,data.torque.z);
+            //data.force *= EPSILON_FACTOR;
+            //data.torque *= EPSILON_FACTOR;
+
+            atomicAdd(&inducedFieldBuffers[atom1], static_cast<unsigned long long>((long long) (data.inducedField.x*0x100000000)));
+            atomicAdd(&inducedFieldBuffers[atom1+PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long) (data.inducedField.y*0x100000000)));
+            atomicAdd(&inducedFieldBuffers[atom1+2*PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long) (data.inducedField.z*0x100000000)));
+
+            //printf("induced field at %d: %12.4f%12.4f%12.4f\n",atom1+1,data.inducedField.x,data.inducedField.y,data.inducedField.z);
+
+        } else {
+
+            // This is an off-diagonal tile.
+            unsigned int j = y * TILE_SIZE + tgx;
+//            loadAtomData(localData[threadIdx.x], j, posq, chgct, dmpct);
+            loadInducedAtomData(localData[threadIdx.x], j, posq, dpl, palpha);
+            localData[threadIdx.x].inducedField = make_real3(0);
+
+            unsigned int tj = tgx;
+            for (j = 0; j < TILE_SIZE; j++) {
+                int atom2 = y * TILE_SIZE + tj;
+                if (atom1 < NUM_ATOMS && atom2 < NUM_ATOMS) {
+                    float c = computeCScaleFactor(covalent, tj);
+                    computeOneInducedInteraction(
+                        data, localData[tbx + tj], c, 1, energy, periodicBoxSize, invPeriodicBoxSize, periodicBoxVecX, periodicBoxVecY, periodicBoxVecZ);    
+                }
+                tj = (tj + 1) & (TILE_SIZE - 1);
+            }
+            unsigned int offset = x * TILE_SIZE + tgx;
+
+            // In this block we are not double counting, so we accumulate on
+            // both atom1 and atom2
+
+            //data.force *= EPSILON_FACTOR;
+            //data.torque *= EPSILON_FACTOR;
+            //localData[threadIdx.x].force *= EPSILON_FACTOR;
+            //localData[threadIdx.x].torque *= EPSILON_FACTOR;
+            
+            atomicAdd(&inducedFieldBuffers[offset], static_cast<unsigned long long>((long long) (data.inducedField.x*0x100000000)));
+            atomicAdd(&inducedFieldBuffers[offset+PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long) (data.inducedField.y*0x100000000)));
+            atomicAdd(&inducedFieldBuffers[offset+2*PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long) (data.inducedField.z*0x100000000)));
+            offset = y * TILE_SIZE + tgx;
+            atomicAdd(&inducedFieldBuffers[offset], static_cast<unsigned long long>((long long) (localData[threadIdx.x].inducedField.x*0x100000000)));
+            atomicAdd(&inducedFieldBuffers[offset+PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long) (localData[threadIdx.x].inducedField.y*0x100000000)));
+            atomicAdd(&inducedFieldBuffers[offset+2*PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long) (localData[threadIdx.x].inducedField.z*0x100000000)));
+        }
+    }
+
+    // Second loop: tiles without exclusions, either from the neighbor list (with cutoff) or just enumerating all
+    // of them (no cutoff).
+
+#ifdef USE_CUTOFF
+    const unsigned int numTiles = interactionCount[0];
+    if (numTiles > maxTiles)
+        return; // There wasn't enough memory for the neighbor list.
+    int pos = (int)(numTiles > maxTiles ? startTileIndex + warp * (long long)numTileIndices / totalWarps : warp * (long long)numTiles / totalWarps);
+    int end = (int)(numTiles > maxTiles ? startTileIndex + (warp + 1) * (long long)numTileIndices / totalWarps : (warp + 1) * (long long)numTiles / totalWarps);
+#else
+    const unsigned int numTiles = numTileIndices;
+    int pos = (int)(startTileIndex + warp * (long long)numTiles / totalWarps);
+    int end = (int)(startTileIndex + (warp + 1) * (long long)numTiles / totalWarps);
+#endif
+    int skipBase = 0;
+    int currentSkipIndex = tbx;
+    skipTiles[threadIdx.x] = -1;
+
+    while (pos < end) {
+        bool includeTile = true;
+
+        // Extract the coordinates of this tile.
+
+        int x, y;
+#ifdef USE_CUTOFF
+        x = tiles[pos];
+#else
+        y = (int)floor(NUM_BLOCKS + 0.5f - SQRT((NUM_BLOCKS + 0.5f) * (NUM_BLOCKS + 0.5f) - 2 * pos));
+        x = (pos - y * NUM_BLOCKS + y * (y + 1) / 2);
+        if (x < y || x >= NUM_BLOCKS) { // Occasionally happens due to roundoff error.
+            y += (x < y ? -1 : 1);
+            x = (pos - y * NUM_BLOCKS + y * (y + 1) / 2);
+        }
+
+        // Skip over tiles that have exclusions, since they were already processed.
+
+        while (skipTiles[tbx + TILE_SIZE - 1] < pos) {
+            if (skipBase + tgx < NUM_TILES_WITH_EXCLUSIONS) {
+                ushort2 tile = exclusionTiles[skipBase + tgx];
+                skipTiles[threadIdx.x] = tile.x + tile.y * NUM_BLOCKS - tile.y * (tile.y + 1) / 2;
+            } else
+                skipTiles[threadIdx.x] = end;
+            skipBase += TILE_SIZE;
+            currentSkipIndex = tbx;
+        }
+        while (skipTiles[currentSkipIndex] < pos)
+            currentSkipIndex++;
+        includeTile = (skipTiles[currentSkipIndex] != pos);
+#endif
+
+        if (includeTile) {
+            unsigned int atom1 = x * TILE_SIZE + tgx;
+
+            // Load atom data for this tile.
+
+            InducedAtomData data;
+//            loadAtomData(data, atom1, posq, chgct, dmpct);
+            loadInducedAtomData(data, atom1, posq, dpl, palpha);
+            data.inducedField = make_real3(0);
+
+#ifdef USE_CUTOFF
+            unsigned int j = interactingAtoms[pos * TILE_SIZE + tgx];
+#else
+            unsigned int j = y * TILE_SIZE + tgx;
+#endif
+
+            atomIndices[threadIdx.x] = j;
+//            loadAtomData(localData[threadIdx.x], j, posq, chgct, dmpct);
+            loadInducedAtomData(localData[threadIdx.x], j, posq, dpl, palpha);
+            localData[threadIdx.x].inducedField = make_real3(0);
+
+            // Compute forces.
+
+            unsigned int tj = tgx;
+            for (j = 0; j < TILE_SIZE; j++) {
+                int atom2 = atomIndices[tbx + tj];
+                if (atom1 < NUM_ATOMS && atom2 < NUM_ATOMS) {
+                    computeOneInducedInteraction(
+                        data, localData[tbx + tj], 1, 1, energy, periodicBoxSize, invPeriodicBoxSize, periodicBoxVecX, periodicBoxVecY, periodicBoxVecZ);
+                }
+                tj = (tj + 1) & (TILE_SIZE - 1);
+            }
+
+            // Write results.
+
+            //data.force *= EPSILON_FACTOR;
+            //data.torque *= EPSILON_FACTOR;
+            //localData[threadIdx.x].force *= EPSILON_FACTOR;
+            //localData[threadIdx.x].torque *= EPSILON_FACTOR;
+
+            unsigned int offset = x * TILE_SIZE + tgx;
+            atomicAdd(&inducedFieldBuffers[offset], static_cast<unsigned long long>((long long) (data.inducedField.x*0x100000000)));
+            atomicAdd(&inducedFieldBuffers[offset+PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long) (data.inducedField.y*0x100000000)));
+            atomicAdd(&inducedFieldBuffers[offset+2*PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long) (data.inducedField.z*0x100000000)));
+
+#ifdef USE_CUTOFF
+            offset = atomIndices[threadIdx.x];
+#else
+            offset = y * TILE_SIZE + tgx;
+#endif
+
+            atomicAdd(&inducedFieldBuffers[offset], static_cast<unsigned long long>((long long) (localData[threadIdx.x].inducedField.x*0x100000000)));
+            atomicAdd(&inducedFieldBuffers[offset+PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long) (localData[threadIdx.x].inducedField.y*0x100000000)));
+            atomicAdd(&inducedFieldBuffers[offset+2*PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long) (localData[threadIdx.x].inducedField.z*0x100000000)));
+
+        }
+        pos++;
+    }
+}
+
+
+
+
+
+
+extern "C" __global__ void dipoleDotPolarity(const long long* __restrict__ source1,
+    const real* __restrict__ polarity, real* __restrict__ result1)
+{
+    const real fieldScale = 1 / (real)0x100000000;
+    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < NUM_ATOMS; i += blockDim.x * gridDim.x) {
+        int index = 3 * i;
+        real poli = polarity[i] * fieldScale;
+        result1[index + 0] = poli * source1[i];
+        result1[index + 1] = poli * source1[i + PADDED_NUM_ATOMS];
+        result1[index + 2] = poli * source1[i + PADDED_NUM_ATOMS * 2];
+    }
+}

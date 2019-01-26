@@ -569,21 +569,21 @@ extern "C" __global__ void fphi_mpole(const real2* __restrict__ pmeGrid,
                                         - tuv010 * fracToCart[0][1]
                                         - tuv001 * fracToCart[0][2])
          * 0x100000000);
-      fieldBuffers[m] = fieldx;
+      fieldBuffers[m] += fieldx;
       fieldPolarBuffers[m] = fieldx;
       long long fieldy = (long long)((dipoleScale * labFrameDipole[m * 3 + 1]
                                         - tuv100 * fracToCart[1][0]
                                         - tuv010 * fracToCart[1][1]
                                         - tuv001 * fracToCart[1][2])
          * 0x100000000);
-      fieldBuffers[m + PADDED_NUM_ATOMS] = fieldy;
+      fieldBuffers[m + PADDED_NUM_ATOMS] += fieldy;
       fieldPolarBuffers[m + PADDED_NUM_ATOMS] = fieldy;
       long long fieldz = (long long)((dipoleScale * labFrameDipole[m * 3 + 2]
                                         - tuv100 * fracToCart[2][0]
                                         - tuv010 * fracToCart[2][1]
                                         - tuv001 * fracToCart[2][2])
          * 0x100000000);
-      fieldBuffers[m + 2 * PADDED_NUM_ATOMS] = fieldz;
+      fieldBuffers[m + 2 * PADDED_NUM_ATOMS] += fieldz;
       fieldPolarBuffers[m + 2 * PADDED_NUM_ATOMS] = fieldz;
    }
 }

@@ -40,7 +40,7 @@ class CudaCalcHippoChargeTransferForceKernel : public CalcHippoChargeTransferFor
     // replusion
     CudaArray sizpr, dmppr, elepr;
     // charge penetration electrostatics
-    CudaArray pcore, pval, palpha;
+    CudaArray pcore, pval, palpha, polarity;
     // torque
     //CudaArray *torque;
 
@@ -84,8 +84,10 @@ class CudaCalcHippoChargeTransferForceKernel : public CalcHippoChargeTransferFor
     CudaArray covalentFlags;
 
     CUfunction energyAndForceKernel;
+    CUfunction ufieldKernel;
 
     //
+    CUfunction dipoleDotPolarityKernel; // dot product routine
     CUfunction rotpoleKernel;   // Tinker rotpole subroutine
     CUfunction mapTorqueKernel; // OpenMM torque mapping routine
 };

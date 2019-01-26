@@ -638,7 +638,7 @@ CUmodule CudaContext::createModule(const string source, const map<string, string
 #else
         string command = compiler+" --ptx --machine "+bits+" -arch=sm_"+gpuArchitecture+" -o \""+outputFile+"\" "+options+" \""+inputFile+"\" 2> \""+logFile+"\"";
         //
-        string copycmd = "cp "+inputFile+" /user/roseane/Applications/tinker_omm_workspace/inter.cu";
+        string copycmd = "cp "+inputFile+" /user/jrackers/hippo-openmm-workspace/inter.cu";
         res = std::system(copycmd.c_str());
         printf(" compile %s\n", command.c_str());
         //

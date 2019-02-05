@@ -1544,10 +1544,10 @@ double CudaCalcHippoChargeTransferForceKernel::execute(ContextImpl &context, boo
                              recipBoxVectorPointer[2]};
       cu.executeKernel(fphi_to_cphi_ind_kernel, fphi_to_cphi_ind_args, numAtoms);
 
-      void* eprecip_args[] = {&cu.getPosq(),
-                        &cu.getForce(),
+      void* eprecip_args[] = {&cu.getPosq().getDevicePointer(),
+                        &cu.getForce().getDevicePointer(),
                         &torque.getDevicePointer(),
-                        &cu.getEnergyBuffer(),
+                        &cu.getEnergyBuffer().getDevicePointer(),
                         &globalFrameDipoles.getDevicePointer(),
                         &globalFrameQuadrupoles.getDevicePointer(),
                         &fracDipoles.getDevicePointer(),

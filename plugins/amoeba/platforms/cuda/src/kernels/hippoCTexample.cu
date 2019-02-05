@@ -4,6 +4,7 @@ typedef struct {
     // charge transfer
     real chgct, dmpct;
 
+
     // repulsion
     real sizpr, elepr, dmppr;
 
@@ -103,6 +104,16 @@ __device__ real computeCScaleFactor(uint2 covalent, int index)
     bool y = (covalent.y & mask);
     return (x ? (y ? (real)CHARGETRANSFER13SCALE : (real)CHARGETRANSFER14SCALE) : (y ? (real)CHARGETRANSFER15SCALE : (real)1.0));
 }
+
+
+__device__ real computeWScaleFactor(uint2 covalent, int index)
+{
+    int mask = 1 << index;
+    bool x = (covalent.x & mask);
+    bool y = (covalent.y & mask);
+    return (x ? (y ? (real)INDUCEDDIPOLE12SCALE : (real)INDUCEDDIPOLE13SCALE) : (y ? (real)INDUCEDDIPOLE14SCALE : (real)1.0));
+}
+
 
 __device__ void computeOneInteraction(AtomData& atom1, AtomData& atom2, real cscale, real doubleCountingFactor, mixed& energyToBeAccumulated,
     real4 periodicBoxSize, real4 invPeriodicBoxSize, real4 periodicBoxVecX, real4 periodicBoxVecY, real4 periodicBoxVecZ)
@@ -1546,7 +1557,7 @@ for (int atom = blockIdx.x*blockDim.x + threadIdx.x; atom < NUM_ATOMS; atom += g
 
 
 
-__device__ void computeOneInducedInteraction(InducedAtomData& atom1, InducedAtomData& atom2, real cscale, real doubleCountingFactor, mixed& energyToBeAccumulated,
+__device__ void computeOneInducedInteraction(InducedAtomData& atom1, InducedAtomData& atom2, real wscale, real doubleCountingFactor, mixed& energyToBeAccumulated,
     real4 periodicBoxSize, real4 invPeriodicBoxSize, real4 periodicBoxVecX, real4 periodicBoxVecY, real4 periodicBoxVecZ)
 {
     // Compute the displacement.
@@ -1658,8 +1669,8 @@ __device__ void computeOneInducedInteraction(InducedAtomData& atom1, InducedAtom
     //real scale3 = wscale(k) * dmpik(3)
     //real scale5 = wscale(k) * dmpik(5)
 
-    real scale3 = 1 * dmpik3;
-    real scale5 = 1 * dmpik5;
+    real scale3 = wscale * dmpik3;
+    real scale5 = wscale * dmpik5;
 
     rr3 = -bn[1] + (1-scale3)*rr3;
     rr5 = bn[2] - 3*(1-scale5)*rr5;
@@ -1684,7 +1695,7 @@ __device__ void computeOneInducedInteraction(InducedAtomData& atom1, InducedAtom
 
 extern "C" __global__ void ufieldReal(
     unsigned long long* __restrict__ inducedFieldBuffers, 
-    const real4* __restrict__ posq, const uint2* __restrict__ covalentFlags, const ushort2* __restrict__ exclusionTiles, unsigned int startTileIndex,
+    const real4* __restrict__ posq, const uint2* __restrict__ covalentFlags24, const ushort2* __restrict__ exclusionTiles, unsigned int startTileIndex,
     unsigned int numTileIndices,
 #ifdef USE_CUTOFF
     const int* __restrict__ tiles, const unsigned int* __restrict__ interactionCount, real4 periodicBoxSize, real4 invPeriodicBoxSize, real4 periodicBoxVecX,
@@ -1717,9 +1728,9 @@ extern "C" __global__ void ufieldReal(
         unsigned int atom1 = x * TILE_SIZE + tgx;
         loadInducedAtomData(data, atom1, posq, dpl, palpha);
         data.inducedField = make_real3(0);
-        uint2 covalent = covalentFlags[pos * TILE_SIZE + tgx];
+        uint2 covalent = covalentFlags24[pos * TILE_SIZE + tgx];
 
-        printf("atom = %d, ind dipole = %12.4f%12.4f%12.4f\n", atom1+1, dpl[3*atom1],dpl[3*atom1+1],dpl[3*atom1+2]);
+        //printf("atom = %d, ind dipole = %12.4f%12.4f%12.4f\n", atom1+1, dpl[3*atom1],dpl[3*atom1+1],dpl[3*atom1+2]);
 //        printf("atom = %d, pcore = %12.4f, palpha = %12.4f, dipole = %12.4f%12.4f%12.4f\n", atom1+1, data.pcore, data.palpha, data.dipole.x, data.dipole.y, data.dipole.z);
 
         if (x == y) {
@@ -1731,9 +1742,9 @@ extern "C" __global__ void ufieldReal(
             for (unsigned int j = 0; j < TILE_SIZE; j++) {
                 int atom2 = y * TILE_SIZE + j;
                 if (atom1 != atom2 && atom1 < NUM_ATOMS && atom2 < NUM_ATOMS) {
-                    real c = computeCScaleFactor(covalent, j);
+                    real w = computeWScaleFactor(covalent, j);
                     computeOneInducedInteraction(
-                        data, localData[tbx + j], c, (real)0.5, energy, periodicBoxSize, invPeriodicBoxSize, periodicBoxVecX, periodicBoxVecY, periodicBoxVecZ);
+                        data, localData[tbx + j], w, (real)0.5, energy, periodicBoxSize, invPeriodicBoxSize, periodicBoxVecX, periodicBoxVecY, periodicBoxVecZ);
                      //printf (" x==y atom = %d atom = %d, energy = %12.4f, palphas: %12.4f%12.4f\n", atom1+1, atom2+1, energy, palpha[atom1], palpha[atom2]);
 
                 }  
@@ -1765,9 +1776,9 @@ extern "C" __global__ void ufieldReal(
             for (j = 0; j < TILE_SIZE; j++) {
                 int atom2 = y * TILE_SIZE + tj;
                 if (atom1 < NUM_ATOMS && atom2 < NUM_ATOMS) {
-                    float c = computeCScaleFactor(covalent, tj);
+                    float w = computeWScaleFactor(covalent, tj);
                     computeOneInducedInteraction(
-                        data, localData[tbx + tj], c, 1, energy, periodicBoxSize, invPeriodicBoxSize, periodicBoxVecX, periodicBoxVecY, periodicBoxVecZ);    
+                        data, localData[tbx + tj], w, 1, energy, periodicBoxSize, invPeriodicBoxSize, periodicBoxVecX, periodicBoxVecY, periodicBoxVecZ);    
                 }
                 tj = (tj + 1) & (TILE_SIZE - 1);
             }
@@ -1918,3 +1929,81 @@ extern "C" __global__ void dipoleDotPolarity(const long long* __restrict__ sourc
         result1[index + 2] = poli * source1[i + PADDED_NUM_ATOMS * 2];
     }
 }
+
+extern "C" __global__ void convert_long_long_to_real_3N(const long long* __restrict__ input,
+real* __restrict__ output) {
+    const real scale = 1 / (real)0x100000000;
+    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < NUM_ATOMS; i += blockDim.x * gridDim.x) {
+        int index = 3 * i;
+        output[index + 0] = scale * input[i] ;
+        output[index + 1] = scale * input[i + PADDED_NUM_ATOMS] ;
+        output[index + 2] = scale * input[i + 2 * PADDED_NUM_ATOMS] ;
+    }
+}
+
+extern "C" __global__ void invAlphaPlusTU(const real* __restrict__ input, const real* __restrict__ polarity,
+const long long* field_ll, real* __restrict__ output) {
+    const real fieldScale = 1 / (real)0x100000000;
+    const float polmin = 1.0e-9;
+    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < NUM_ATOMS; i += blockDim.x * gridDim.x) {
+        int index1 = 3 * i;
+        const float poli = max(polmin, polarity[i]);
+        const real invPoli = RECIP(poli);
+        output[index1 + 0] = input[index1 + 0] * invPoli - fieldScale * field_ll[i];
+        output[index1 + 1] = input[index1 + 1] * invPoli - fieldScale * field_ll[i + PADDED_NUM_ATOMS];
+        output[index1 + 2] = input[index1 + 2] * invPoli - fieldScale * field_ll[i + PADDED_NUM_ATOMS * 2];
+      }
+}
+
+
+extern "C" __global__ void dotProductBuffer(const real* __restrict__ vec1, const real* __restrict__ vec2,
+real* __restrict__ buffer)    {
+    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < 3 * NUM_ATOMS; i += blockDim.x * gridDim.x) {
+        buffer[i] = vec1[i] * vec2[i];
+      }
+}
+
+extern "C" __global__ void quadraticBuffer(
+    const real* __restrict__ vec1, const real* __restrict__ vec2, const real* __restrict__ polarity,
+    real* __restrict__ buffer
+) {
+    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < NUM_ATOMS; i += blockDim.x * gridDim.x) {
+        int index = 3 * i;
+        real poli = polarity[i];
+        buffer[index + 0] = poli * vec1[index + 0] * vec2[index + 0];
+        buffer[index + 1] = poli * vec1[index + 1] * vec2[index + 1];
+        buffer[index + 2] = poli * vec1[index + 2] * vec2[index + 2];
+      }
+}
+
+
+extern "C" __global__ void updateMuRsd(real* __restrict__ mu, real* __restrict__ rsd,
+const real* __restrict__ pvec, const real* __restrict__ tp, real gamma) {
+    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < 3 * NUM_ATOMS; i += blockDim.x * gridDim.x) {
+        mu[i] += gamma * pvec[i];
+        rsd[i] -= gamma * tp[i];
+      }
+}
+
+extern "C" __global__ void updatePVec(real* __restrict__ pvec, const real* __restrict__ rsd,
+const real* __restrict__ polarity, real beta) {
+    //printf("CUDA beta = %12.5lf\n",beta);
+    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < NUM_ATOMS; i += blockDim.x * gridDim.x) {
+        int j = 3 * i;
+        real poli = polarity[i];
+        pvec[j + 0] = poli * rsd[j + 0] + beta * pvec[j + 0];
+        pvec[j + 1] = poli * rsd[j + 1] + beta * pvec[j + 1];
+        pvec[j + 2] = poli * rsd[j + 2] + beta * pvec[j + 2];
+      }
+}
+
+extern "C" __global__ void muDotMpoleBuffer(const real* __restrict__ vec1, const long long* __restrict__ vec2,
+    mixed* __restrict__ buffer)    {
+        const real scale = 0.5f * EPSILON_FACTOR / (real)0x100000000;
+        for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < NUM_ATOMS; i += blockDim.x * gridDim.x) {
+            int index1 = 3 * i;
+            buffer[blockIdx.x * blockDim.x + threadIdx.x] -= scale*(vec1[index1 + 0] * vec2[i]);
+            buffer[blockIdx.x * blockDim.x + threadIdx.x] -= scale*(vec1[index1 + 1] * vec2[i + PADDED_NUM_ATOMS]);
+            buffer[blockIdx.x * blockDim.x + threadIdx.x] -= scale*(vec1[index1 + 2] * vec2[i + PADDED_NUM_ATOMS * 2]);
+        }
+    }

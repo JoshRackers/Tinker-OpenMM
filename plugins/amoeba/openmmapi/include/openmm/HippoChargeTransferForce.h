@@ -17,6 +17,10 @@ public:
         ct3scale = 0.0;
         ct4scale = 0.4;
         ct5scale = 0.8;
+
+        w2scale = 0.0;
+        w3scale = 1.0;
+        w4scale = 1.0;
     }
 
     void setCTScales(double c3, double c4, double c5) {
@@ -30,6 +34,19 @@ public:
     	c4 = ct4scale;
     	c5 = ct5scale;
     }
+
+    void setWScales(double w2, double w3, double w4) {
+    	w2scale = w2;
+    	w3scale = w3;
+    	w4scale = w4;
+    }
+
+    void getWScales(double& w2, double& w3, double& w4) const {
+    	w2 = w2scale;
+    	w3 = w3scale;
+    	w4 = w4scale;
+    }
+
 
     // charge transfer
 
@@ -215,6 +232,21 @@ public:
 
     void setPMEOrder(int order) { pmeorder = order; }
 
+    // PCG
+
+    void setPCGParameters(double input_polareps, int input_maxiter) {
+        polareps = input_polareps;
+        maxiter = input_maxiter;
+    }
+
+    void getPCGParameters(double &output_polareps, int &output_maxiter) const {
+        output_polareps = polareps;
+        output_maxiter = maxiter;
+    }
+
+
+
+
     // repulsion
 
     // std::vector<double> sizpr, dmppr, elepr;
@@ -368,9 +400,14 @@ protected:
     double pmeCutoffDistance, ewaldAlpha, ewaldErrorTolerance;
     int    pmeorder, pmenx, pmeny, pmenz;
 
+    // PCG
+    double polareps;
+    int maxiter;
+
     // charge transfer
     double ctTaperDistance, ctCutoffDistance;
     double ct3scale, ct4scale, ct5scale;
+    double w2scale, w3scale, w4scale;
     std::vector<double> ctalpha, ctcharge;
 
     // dispersion

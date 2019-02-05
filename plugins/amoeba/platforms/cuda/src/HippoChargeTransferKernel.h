@@ -57,6 +57,20 @@ class CudaCalcHippoChargeTransferForceKernel : public CalcHippoChargeTransferFor
     CudaArray fracDipoles, fracQuadrupoles;
     CudaArray fphi, cphi;
     CudaArray phid, phip, phidp;
+
+    // PCG
+    int maxIterations;
+    double inducedEpsilon, rmrSum;
+    CudaArray rsd_ll, rsd_real, pvec, tp, ptp, rmr;
+    template <class T> void diagPCGInit();
+    template <class T> bool diagPCGIter(int niter);
+    template <class T> void diagPCG(int maxIterations);
+    CUfunction convertLongLongToReal3NKernel;
+    CUfunction invAlphaPlusTUKernel;
+    CUfunction dotProductBufferKernel, quadraticBufferKernel;
+    CUfunction updateMuRsdKernel, updatePVecKernel;
+    void tmat(CudaArray& inp, CudaArray& outp);
+
     //
     CUfunction cmp_to_fmp_kernel, grid_mpole_kernel, grid_uind_kernel,
         grid_convert_to_double_kernel;
@@ -67,26 +81,36 @@ class CudaCalcHippoChargeTransferForceKernel : public CalcHippoChargeTransferFor
     CUfunction torque_to_force_kernel;
     void cmp_to_fmp();
     void grid_mpole();
-    void grid_uind();
+    void grid_uind(CudaArray&);
     void fftfront();
     void pme_convolution();
     void fftback();
     void fphi_mpole();
     void fphi_uind();
     void fphi_to_cphi(CudaArray &phiarray);
-    void ufield_recip_self();
+    void ufield_recip_self(CudaArray&, CudaArray&);
     void recip_mpole_energy_force_torque();
     void torque_to_force();
-    void ufield();
+    // Expects a "real" array as input, and a "long long" array as output.
+    void ufield(CudaArray&, CudaArray&);
 
     // kernels
     std::vector<int3> covalentFlagValues;
     CudaArray covalentFlags;
+    
+    std::vector<int3> covalentFlag24Values;
+    CudaArray covalentFlags24;
 
     CUfunction energyAndForceKernel;
     CUfunction ufieldKernel;
+    CUfunction epolarKernel;
+
+    // induced dipole recip
+    CUfunction fphi_to_cphi_ind_kernel;
+    CUfunction eprecip_kernel;
 
     //
+    CUfunction muDotMpoleKernel; // dipoles dot perm field
     CUfunction dipoleDotPolarityKernel; // dot product routine
     CUfunction rotpoleKernel;   // Tinker rotpole subroutine
     CUfunction mapTorqueKernel; // OpenMM torque mapping routine

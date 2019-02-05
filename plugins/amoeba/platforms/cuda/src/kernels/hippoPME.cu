@@ -1322,3 +1322,240 @@ extern "C" __global__ void torque_to_force(
       }
    }
 }
+
+
+////////////////////////////// induced dipole stuff - zw
+
+extern "C" __global__ void fphi_to_cphi_ind(const real* __restrict__ fphi,
+   real* __restrict__ cphi,
+   real3 recipBoxVecX, real3 recipBoxVecY,
+   real3 recipBoxVecZ) {
+// Build matrices for transforming the potential.
+
+__shared__ real a[3][3];
+if (threadIdx.x == 0) {
+a[0][0] = GRID_SIZE_X * recipBoxVecX.x;
+a[1][0] = GRID_SIZE_X * recipBoxVecY.x;
+a[2][0] = GRID_SIZE_X * recipBoxVecZ.x;
+a[0][1] = GRID_SIZE_Y * recipBoxVecX.y;
+a[1][1] = GRID_SIZE_Y * recipBoxVecY.y;
+a[2][1] = GRID_SIZE_Y * recipBoxVecZ.y;
+a[0][2] = GRID_SIZE_Z * recipBoxVecX.z;
+a[1][2] = GRID_SIZE_Z * recipBoxVecY.z;
+a[2][2] = GRID_SIZE_Z * recipBoxVecZ.z;
+}
+__syncthreads();
+int index1[] = {0, 1, 2, 0, 0, 1};
+int index2[] = {0, 1, 2, 1, 2, 2};
+__shared__ real b[6][6];
+if (threadIdx.x < 36) {
+int i = threadIdx.x / 6;
+int j = threadIdx.x - 6 * i;
+b[i][j] = a[index1[i]][index1[j]] * a[index2[i]][index2[j]];
+if (index1[j] != index2[j])
+b[i][j] +=
+(i < 3 ? b[i][j] : a[index1[i]][index2[j]] * a[index2[i]][index1[j]]);
+}
+__syncthreads();
+
+// Transform the potential.
+
+for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < NUM_ATOMS;
+i += blockDim.x * gridDim.x) {
+cphi[10 * i] = fphi[i];
+cphi[10 * i + 1] = a[0][0] * fphi[i + NUM_ATOMS * 1] +
+a[0][1] * fphi[i + NUM_ATOMS * 2] + a[0][2] * fphi[i + NUM_ATOMS * 3];
+cphi[10 * i + 2] = a[1][0] * fphi[i + NUM_ATOMS * 1] +
+a[1][1] * fphi[i + NUM_ATOMS * 2] + a[1][2] * fphi[i + NUM_ATOMS * 3];
+cphi[10 * i + 3] = a[2][0] * fphi[i + NUM_ATOMS * 1] +
+a[2][1] * fphi[i + NUM_ATOMS * 2] + a[2][2] * fphi[i + NUM_ATOMS * 3];
+for (int j = 0; j < 6; j++) {
+cphi[10 * i + 4 + j] = 0;
+for (int k = 0; k < 6; k++)
+cphi[10 * i + 4 + j] += b[j][k] * fphi[i + NUM_ATOMS * (4 + k)];
+}
+}
+}
+
+
+extern "C" __global__ void
+eprecip(real4* __restrict__ posq, unsigned long long* __restrict__ forceBuffers,
+        long long* __restrict__ torqueBuffers, mixed* __restrict__ energyBuffer,
+        const real* __restrict__ labFrameDipole,
+        const real* __restrict__ labFrameQuadrupole,
+        const real* __restrict__ fracDipole,
+        const real* __restrict__ fracQuadrupole,
+        const real* __restrict__ inducedDipole_global,
+        const real* __restrict__ inducedDipolePolar_global,
+        const real* __restrict__ phi, const real* __restrict__ phid,
+        const real* __restrict__ phip, const real* __restrict__ phidp,
+        const real* __restrict__ cphi_global, real3 recipBoxVecX,
+        real3 recipBoxVecY, real3 recipBoxVecZ) {
+  real multipole[10];
+  real cinducedDipole[3], inducedDipole[3];
+  real cinducedDipolePolar[3], inducedDipolePolar[3];
+  const int deriv1[] = {1, 4, 7, 8, 10, 15, 17, 13, 14, 19};
+  const int deriv2[] = {2, 7, 5, 9, 13, 11, 18, 15, 19, 16};
+  const int deriv3[] = {3, 8, 9, 6, 14, 16, 12, 19, 17, 18};
+  mixed energy = 0;
+  __shared__ real fracToCart[3][3];
+  if (threadIdx.x == 0) {
+    fracToCart[0][0] = GRID_SIZE_X * recipBoxVecX.x;
+    fracToCart[1][0] = GRID_SIZE_X * recipBoxVecY.x;
+    fracToCart[2][0] = GRID_SIZE_X * recipBoxVecZ.x;
+    fracToCart[0][1] = GRID_SIZE_Y * recipBoxVecX.y;
+    fracToCart[1][1] = GRID_SIZE_Y * recipBoxVecY.y;
+    fracToCart[2][1] = GRID_SIZE_Y * recipBoxVecZ.y;
+    fracToCart[0][2] = GRID_SIZE_Z * recipBoxVecX.z;
+    fracToCart[1][2] = GRID_SIZE_Z * recipBoxVecY.z;
+    fracToCart[2][2] = GRID_SIZE_Z * recipBoxVecZ.z;
+  }
+  __syncthreads();
+
+  real term = (4.0f/3.0f) * EWALD_ALPHA*EWALD_ALPHA*EWALD_ALPHA / SQRT_PI;
+
+  for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < NUM_ATOMS;
+       i += blockDim.x * gridDim.x) {
+    // Compute the torque.
+    multipole[0] = posq[i].w;
+    multipole[1] = labFrameDipole[i * 3];
+    multipole[2] = labFrameDipole[i * 3 + 1];
+    multipole[3] = labFrameDipole[i * 3 + 2];
+    multipole[4] = labFrameQuadrupole[i * 5];
+    multipole[5] = labFrameQuadrupole[i * 5 + 3];
+    multipole[6] = -(multipole[4] + multipole[5]);
+    multipole[7] = 2 * labFrameQuadrupole[i * 5 + 1];
+    multipole[8] = 2 * labFrameQuadrupole[i * 5 + 2];
+    multipole[9] = 2 * labFrameQuadrupole[i * 5 + 4];
+    const real* cphi = &cphi_global[10 * i];
+
+    // self-torque (don't need self-energy because i'm doing dot product)
+    //term = (4.0f/3.0f) * EPSILON_FACTOR * EWALD_ALPHA*EWALD_ALPHA*EWALD_ALPHA / SQRT_PI;
+    real dix = multipole[1];
+    real diy = multipole[2];
+    real diz = multipole[3];
+
+    real uix = inducedDipole_global[i * 3];
+    real uiy = inducedDipole_global[i * 3 + 1];
+    real uiz = inducedDipole_global[i * 3 + 2];
+    
+    torqueBuffers[i] +=
+        (long long)(0.5f * EPSILON_FACTOR *
+                    (multipole[3] * cphi[2] - multipole[2] * cphi[3] +
+                     2 * (multipole[6] - multipole[5]) * cphi[9] +
+                     multipole[8] * cphi[7] + multipole[9] * cphi[5] -
+                     multipole[7] * cphi[8] - multipole[9] * cphi[6] +
+                     term*(diy*uiz-diz*uiy)) *
+                    0x100000000);
+
+    torqueBuffers[i + PADDED_NUM_ATOMS] +=
+        (long long)(0.5f * EPSILON_FACTOR *
+                    (multipole[1] * cphi[3] - multipole[3] * cphi[1] +
+                     2 * (multipole[4] - multipole[6]) * cphi[8] +
+                     multipole[7] * cphi[9] + multipole[8] * cphi[6] -
+                     multipole[8] * cphi[4] - multipole[9] * cphi[7] +
+                     term * (diz*uix-dix*uiz)) *
+                    0x100000000);
+
+    torqueBuffers[i + PADDED_NUM_ATOMS * 2] +=
+        (long long)(0.5f * EPSILON_FACTOR *
+                    (multipole[2] * cphi[1] - multipole[1] * cphi[2] +
+                     2 * (multipole[5] - multipole[4]) * cphi[7] +
+                     multipole[7] * cphi[4] + multipole[9] * cphi[8] -
+                     multipole[7] * cphi[5] - multipole[8] * cphi[9] +
+                     term * (dix*uiy-diy*uix)) *
+                    0x100000000);
+
+    // Compute the force and energy.
+
+    multipole[1] = fracDipole[i * 3];
+    multipole[2] = fracDipole[i * 3 + 1];
+    multipole[3] = fracDipole[i * 3 + 2];
+    multipole[4] = fracQuadrupole[i * 6];
+    multipole[5] = fracQuadrupole[i * 6 + 3];
+    multipole[6] = fracQuadrupole[i * 6 + 5];
+    multipole[7] = fracQuadrupole[i * 6 + 1];
+    multipole[8] = fracQuadrupole[i * 6 + 2];
+    multipole[9] = fracQuadrupole[i * 6 + 4];
+
+    cinducedDipole[0] = inducedDipole_global[i * 3];
+    cinducedDipole[1] = inducedDipole_global[i * 3 + 1];
+    cinducedDipole[2] = inducedDipole_global[i * 3 + 2];
+    cinducedDipolePolar[0] = inducedDipolePolar_global[i * 3];
+    cinducedDipolePolar[1] = inducedDipolePolar_global[i * 3 + 1];
+    cinducedDipolePolar[2] = inducedDipolePolar_global[i * 3 + 2];
+
+    // Multiply the dipoles by cartToFrac, which is just the transpose of
+    // fracToCart.
+
+    inducedDipole[0] = cinducedDipole[0] * fracToCart[0][0] +
+        cinducedDipole[1] * fracToCart[1][0] +
+        cinducedDipole[2] * fracToCart[2][0];
+    inducedDipole[1] = cinducedDipole[0] * fracToCart[0][1] +
+        cinducedDipole[1] * fracToCart[1][1] +
+        cinducedDipole[2] * fracToCart[2][1];
+    inducedDipole[2] = cinducedDipole[0] * fracToCart[0][2] +
+        cinducedDipole[1] * fracToCart[1][2] +
+        cinducedDipole[2] * fracToCart[2][2];
+    inducedDipolePolar[0] = cinducedDipolePolar[0] * fracToCart[0][0] +
+        cinducedDipolePolar[1] * fracToCart[1][0] +
+        cinducedDipolePolar[2] * fracToCart[2][0];
+    inducedDipolePolar[1] = cinducedDipolePolar[0] * fracToCart[0][1] +
+        cinducedDipolePolar[1] * fracToCart[1][1] +
+        cinducedDipolePolar[2] * fracToCart[2][1];
+    inducedDipolePolar[2] = cinducedDipolePolar[0] * fracToCart[0][2] +
+        cinducedDipolePolar[1] * fracToCart[1][2] +
+        cinducedDipolePolar[2] * fracToCart[2][2];
+    real4 f = make_real4(0, 0, 0, 0);
+
+    energy += (inducedDipole[0] + inducedDipolePolar[0]) * phi[i + NUM_ATOMS];
+    energy +=
+        (inducedDipole[1] + inducedDipolePolar[1]) * phi[i + NUM_ATOMS * 2];
+    energy +=
+        (inducedDipole[2] + inducedDipolePolar[2]) * phi[i + NUM_ATOMS * 3];
+
+    for (int k = 0; k < 3; k++) {
+      int j1 = deriv1[k + 1];
+      int j2 = deriv2[k + 1];
+      int j3 = deriv3[k + 1];
+      f.x +=
+          (inducedDipole[k] + inducedDipolePolar[k]) * phi[i + NUM_ATOMS * j1];
+      f.y +=
+          (inducedDipole[k] + inducedDipolePolar[k]) * phi[i + NUM_ATOMS * j2];
+      f.z +=
+          (inducedDipole[k] + inducedDipolePolar[k]) * phi[i + NUM_ATOMS * j3];
+      f.x += (inducedDipole[k] * phip[i + NUM_ATOMS * j1] +
+              inducedDipolePolar[k] * phid[i + NUM_ATOMS * j1]);
+      f.y += (inducedDipole[k] * phip[i + NUM_ATOMS * j2] +
+              inducedDipolePolar[k] * phid[i + NUM_ATOMS * j2]);
+      f.z += (inducedDipole[k] * phip[i + NUM_ATOMS * j3] +
+              inducedDipolePolar[k] * phid[i + NUM_ATOMS * j3]);
+    }
+
+    for (int k = 0; k < 10; k++) {
+      f.x += multipole[k] * phidp[i + NUM_ATOMS * deriv1[k]];
+      f.y += multipole[k] * phidp[i + NUM_ATOMS * deriv2[k]];
+      f.z += multipole[k] * phidp[i + NUM_ATOMS * deriv3[k]];
+    }
+    f = make_real4(0.5f * EPSILON_FACTOR *
+                       (f.x * fracToCart[0][0] + f.y * fracToCart[0][1] +
+                        f.z * fracToCart[0][2]),
+                   0.5f * EPSILON_FACTOR *
+                       (f.x * fracToCart[1][0] + f.y * fracToCart[1][1] +
+                        f.z * fracToCart[1][2]),
+                   0.5f * EPSILON_FACTOR *
+                       (f.x * fracToCart[2][0] + f.y * fracToCart[2][1] +
+                        f.z * fracToCart[2][2]),
+                   0);
+    forceBuffers[i] -=
+        static_cast<unsigned long long>((long long)(f.x * 0x100000000));
+    forceBuffers[i + PADDED_NUM_ATOMS] -=
+        static_cast<unsigned long long>((long long)(f.y * 0x100000000));
+    forceBuffers[i + PADDED_NUM_ATOMS * 2] -=
+        static_cast<unsigned long long>((long long)(f.z * 0x100000000));
+  }
+  energyBuffer[blockIdx.x * blockDim.x + threadIdx.x] +=
+      0.25f * EPSILON_FACTOR * energy;
+}
+
+

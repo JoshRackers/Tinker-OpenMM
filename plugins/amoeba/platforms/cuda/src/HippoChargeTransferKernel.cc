@@ -247,8 +247,6 @@ void CudaCalcHippoChargeTransferForceKernel::initialize(const System &system, co
          defines["GRID_SIZE_Z"] = cu.intToString(nfft3);
          defines["EPSILON_FACTOR"] = cu.doubleToString(138.9354558456);
 
-         printf("Ewald alpha = %12.4f\n",ewaldAlpha);
-
          // PME gird
          int ntot = nfft1 * nfft2 * nfft3;
          qgrid.initialize(cu, ntot, 2 * elementSize, "qgrid");
@@ -435,7 +433,6 @@ void CudaCalcHippoChargeTransferForceKernel::initialize(const System &system, co
 
       double wscales[3];
       force.getWScales(wscales[0], wscales[1], wscales[2]);
-      printf("wscales: %12.4f%12.4f%12.4f\n",wscales[0],wscales[1],wscales[2]);
       defines["INDUCEDDIPOLE12SCALE"] = cu.doubleToString(wscales[0]);
       defines["INDUCEDDIPOLE13SCALE"] = cu.doubleToString(wscales[1]);
       defines["INDUCEDDIPOLE14SCALE"] = cu.doubleToString(wscales[2]);
@@ -702,17 +699,11 @@ void CudaCalcHippoChargeTransferForceKernel::initialize(const System &system, co
       //    CUmodule module = cu.createModule(CudaKernelSources::vectorOps+CudaAmoebaKernelSources::multipoles, defines);
       //    mapTorqueKernel = cu.getKernel(module, "mapTorqueToForce");
 
-      printf(" start compiling CT module\n");
       CUmodule hippoModule = cu.createModule(CudaKernelSources::vectorOps + CudaAmoebaKernelSources::hippoRotpole + 
          CudaAmoebaKernelSources::hippoCTexample + CudaAmoebaKernelSources::hippoPolar, defines);
-      printf(" compiling CT module 100 \n");
-      fflush(stdout);
       energyAndForceKernel = cu.getKernel(hippoModule, "computeChargeTransfer");
-      printf(" end compiling CT module\n");
 
-      printf(" start compiling Polar module");
       epolarKernel = cu.getKernel(hippoModule, "computePolar");
-      printf(" end compiling Polar module");
 
       dipoleDotPolarityKernel = cu.getKernel(hippoModule, "dipoleDotPolarity");
       ufieldKernel = cu.getKernel(hippoModule, "ufieldReal");
@@ -761,7 +752,6 @@ void CudaCalcHippoChargeTransferForceKernel::initialize(const System &system, co
       double cutoffDistanceForNBList = max(chgtrncutoff, repelcutoff);
       cutoffDistanceForNBList = max(cutoffDistanceForNBList, pmeCutoffDistance);
       cu.getNonbondedUtilities().addInteraction(true, true, true, cutoffDistanceForNBList, exclusions, "", force.getForceGroup());
-      printf(" before setUsePadding\n");
       cu.getNonbondedUtilities().setUsePadding(false);
       cu.addForce(new ForceInfo(force));
    }
@@ -781,7 +771,7 @@ void CudaCalcHippoChargeTransferForceKernel::initializeScaleFactors()
    vector<ushort2> exclusionTiles;
    nb.getExclusionTiles().download(exclusionTiles);
    map<pair<int, int>, int> exclusionTileMap;
-   printf(" -- total number of exclusions tiles %d\n", (int)exclusionTiles.size());
+   //printf(" -- total number of exclusions tiles %d\n", (int)exclusionTiles.size());
    for (int i = 0; i < (int)exclusionTiles.size(); i++)
    {
       ushort2 tile = exclusionTiles[i];
@@ -1048,7 +1038,7 @@ void CudaCalcHippoChargeTransferForceKernel::ufield(CudaArray& inp, CudaArray& o
       dx = long_long_to_double * fx;
       dy = long_long_to_double * fy;
       dz = long_long_to_double * fz;
-      printf("total induced field for atom %5d %12.5e%12.5e%12.5e\n", i+1, dx, dy, dz);
+      //printf("total induced field for atom %5d %12.5e%12.5e%12.5e\n", i+1, dx, dy, dz);
    }
 }
 
@@ -1091,7 +1081,7 @@ template <class T> void CudaCalcHippoChargeTransferForceKernel::diagPCGInit() {
             dy = ptr[3*i+1];
             dz = ptr[3*i+2];
          }
-         printf("init induced dipole for atom %5d %12.5e%12.5e%12.5e\n", i+1, dx, dy, dz);
+         //printf("init induced dipole for atom %5d %12.5e%12.5e%12.5e\n", i+1, dx, dy, dz);
       }
 
 
@@ -1102,28 +1092,6 @@ template <class T> void CudaCalcHippoChargeTransferForceKernel::diagPCGInit() {
   ufield(inducedDipole, rsd_ll);
   void* convert_args[] = {&rsd_ll.getDevicePointer(), &rsd_real.getDevicePointer()};
   cu.executeKernel(convertLongLongToReal3NKernel, convert_args, numAtoms);
-
-      std::vector<double> rsdVec;
-      rsdVec.reserve(rsd_real.getSize());
-      rsd_real.download(&rsdVec[0]);
-      for (int i = 0; i < numAtoms; ++i) {
-         double dx, dy, dz;
-         if (useDoublePrecision) {
-            dx = rsdVec[3*i];
-            dy = rsdVec[3*i+1];
-            dz = rsdVec[3*i+2];
-         }
-         else {
-            float* ptr = (float*)(&rsdVec[0]);
-            dx = ptr[3*i];
-            dy = ptr[3*i+1];
-            dz = ptr[3*i+2];
-         }
-         printf("rsd for atom %5d %12.5e%12.5e%12.5e\n", i+1, dx, dy, dz);
-      }
-
-
-
   
   // CudaArray pvec -- search direction, pvec0 = diag. rsd0
   void* pvec_args[] = {
@@ -1152,10 +1120,8 @@ template <class T> void CudaCalcHippoChargeTransferForceKernel::diagPCGInit() {
   rmr.download(fcb);
   for (int i = 0; i < 3 * numAtoms; ++i) {
      T val = fcb[i];
-     printf("pcg init rmr val for pos %d = %12.4lf\n", i+1, val);
   }
   rmrSum = std::accumulate(fcb, fcb + 3 * numAtoms, (T)0);
-  printf("rmrSum value = %12.4lf\n", rmrSum);
 }
 
 // iteration
@@ -1168,34 +1134,13 @@ template <class T> bool  CudaCalcHippoChargeTransferForceKernel::diagPCGIter(int
   T ptp_sum = std::accumulate(fcb, fcb + 3 * numAtoms, (T)0);
   T rmr_sum_0 = rmrSum;
   T gamma = rmr_sum_0 / ptp_sum;
-  printf("%6d iteration , rmr_sum_0 = %12.4lf, ptp_sum = %12.4lf\n", niter, rmr_sum_0, ptp_sum);
+  //printf("%6d iteration , rmr_sum_0 = %12.4lf, ptp_sum = %12.4lf\n", niter, rmr_sum_0, ptp_sum);
 
   //////// mu <--updated by-- mu + g0 * pvec;
   //////// rsd <--updated by-- rsd - g0 * T.pvec;
   void* mursd_args[] = {&inducedDipole.getDevicePointer(), &rsd_real.getDevicePointer(),
   &pvec.getDevicePointer(), &tp.getDevicePointer(), &gamma};
   cu.executeKernel(updateMuRsdKernel, mursd_args, numAtoms);
-
-      // print new rsd
-      std::vector<double> inducedDipoleVec;
-      inducedDipoleVec.reserve(inducedDipole.getSize());
-      rsd_real.download(&inducedDipoleVec[0]);
-      for (int i = 0; i < numAtoms; ++i) {
-         double dx, dy, dz;
-         if (useDoublePrecision) {
-            dx = inducedDipoleVec[3*i];
-            dy = inducedDipoleVec[3*i+1];
-            dz = inducedDipoleVec[3*i+2];
-         }
-         else {
-            float* ptr = (float*)(&inducedDipoleVec[0]);
-            dx = ptr[3*i];
-            dy = ptr[3*i+1];
-            dz = ptr[3*i+2];
-         }
-         printf("100 rsd for atom %5d %12.5e%12.5e%12.5e\n", i+1, dx, dy, dz);
-      }
-
 
   //////// beta
   // CudaArray rmr -- rsd.M.rsd
@@ -1223,31 +1168,12 @@ template <class T> bool  CudaCalcHippoChargeTransferForceKernel::diagPCGIter(int
   T beta = rmr_sum_1 / rmr_sum_0;
   rmrSum = rmr_sum_1;
 
-  printf("beta = %12.4lf, gamma = %12.4lf \n",beta,gamma);
+  //printf("beta = %12.4lf, gamma = %12.4lf \n",beta,gamma);
 
   //////// pvec <--updated by-- M.rsd + beta*pvec
   void* pvec_args[] = {&pvec.getDevicePointer(), &rsd_real.getDevicePointer(),
   &polarity.getDevicePointer(), &beta};
   cu.executeKernel(updatePVecKernel, pvec_args, numAtoms);
-
-      inducedDipoleVec.reserve(inducedDipole.getSize());
-      pvec.download(&inducedDipoleVec[0]);
-      for (int i = 0; i < numAtoms; ++i) {
-         double dx, dy, dz;
-         if (useDoublePrecision) {
-            dx = inducedDipoleVec[3*i];
-            dy = inducedDipoleVec[3*i+1];
-            dz = inducedDipoleVec[3*i+2];
-         }
-         else {
-            float* ptr = (float*)(&inducedDipoleVec[0]);
-            dx = ptr[3*i];
-            dy = ptr[3*i+1];
-            dz = ptr[3*i+2];
-         }
-         printf("100 pvec for atom %5d %12.5e%12.5e%12.5e\n", i+1, dx, dy, dz);
-      }
-
 
   //////// update tp
   tmat(pvec, tp);
@@ -1265,7 +1191,6 @@ template <class T> bool  CudaCalcHippoChargeTransferForceKernel::diagPCGIter(int
 
 template <class T> void CudaCalcHippoChargeTransferForceKernel::diagPCG(int maxIterations) {
   diagPCGInit<T>();
-  printf("max iteration = %d \n",maxIterations);
   for (int i = 0; i < maxIterations; ++i) {
      printf("starting iteration %d\n",i);
     if (diagPCGIter<T>(i))
@@ -1297,7 +1222,6 @@ double CudaCalcHippoChargeTransferForceKernel::execute(ContextImpl &context, boo
    cu.executeKernel(rotpoleKernel, rotpoleArgs, cu.getNumAtoms());
 
    printf(" -- CT execute \n");
-   printf(" RACKZILLA - attack \n");
 
    CudaNonbondedUtilities &nb = cu.getNonbondedUtilities();
    int startTileIndex = nb.getStartTileIndex();
@@ -1334,30 +1258,7 @@ double CudaCalcHippoChargeTransferForceKernel::execute(ContextImpl &context, boo
 
    cu.executeKernel(energyAndForceKernel, argsEnergyAndForce, numForceThreadBlocks * energyAndForceThreads, energyAndForceThreads);
 
-   // print real part of mpolefield
-   std::vector<long long> mpoleFieldVec;
-   mpoleFieldVec.reserve(mpoleField.getSize());
-   mpoleField.download(mpoleFieldVec);
-   for (int i = 0; i < paddedNumAtoms; ++i) {
-      // x1, x2, x3, ..., xN; y1, y2, y3, ..., yN; z1, z2, z3, ..., zN.
-      long long fx, fy, fz;
-      fx = mpoleFieldVec[i];
-      fy = mpoleFieldVec[i+paddedNumAtoms];
-      fz = mpoleFieldVec[i+2*paddedNumAtoms];
-      double dx, dy, dz;
-      const double long_long_to_double = 1.0 / 0x100000000;
-      dx = long_long_to_double * fx;
-      dy = long_long_to_double * fy;
-      dz = long_long_to_double * fz;
-      printf("real field for atom %5d %12.5e%12.5e%12.5e\n", i+1, dx, dy, dz);
-   }
-
-   printf(" Finished Real Space \n");
-
    // if use PME
-
-   printf("Initialized PME? %d \n",hasInitializedFFT);
-
    if (hasInitializedFFT)
    {
       // reciporcal box vectors
@@ -1404,25 +1305,6 @@ double CudaCalcHippoChargeTransferForceKernel::execute(ContextImpl &context, boo
       // convert fractional phi to cartesian phi
       fphi_to_cphi(fphi);
 
-      // print mpoleField
-
-      std::vector<long long> mpoleFieldVec;
-      mpoleFieldVec.reserve(mpoleField.getSize());
-      mpoleField.download(mpoleFieldVec);
-      for (int i = 0; i < paddedNumAtoms; ++i) {
-         // x1, x2, x3, ..., xN; y1, y2, y3, ..., yN; z1, z2, z3, ..., zN.
-         long long fx, fy, fz;
-         fx = mpoleFieldVec[i];
-         fy = mpoleFieldVec[i+paddedNumAtoms];
-         fz = mpoleFieldVec[i+2*paddedNumAtoms];
-         double dx, dy, dz;
-         const double long_long_to_double = 1.0 / 0x100000000;
-         dx = long_long_to_double * fx;
-         dy = long_long_to_double * fy;
-         dz = long_long_to_double * fz;
-         printf("field for atom %5d %12.5e%12.5e%12.5e\n", i+1, dx, dy, dz);
-      }
-
       // recip force and torque
       recip_mpole_energy_force_torque();
 
@@ -1437,31 +1319,6 @@ double CudaCalcHippoChargeTransferForceKernel::execute(ContextImpl &context, boo
          &inducedDipole.getDevicePointer()};
       cu.executeKernel(dipoleDotPolarityKernel, dotArgs, numAtoms);
       cu.clearBuffer(inducedDipoleP);
-
-
-      // print induced dipoles
-      //std::vector<double> inducedDipoleVec;
-      //inducedDipoleVec.reserve(inducedDipole.getSize());
-      //inducedDipole.download(&inducedDipoleVec[0]);
-      //for (int i = 0; i < numAtoms; ++i) {
-      //   double dx, dy, dz;
-      //   if (useDoublePrecision) {
-      //      dx = inducedDipoleVec[3*i];
-      //      dy = inducedDipoleVec[3*i+1];
-      //      dz = inducedDipoleVec[3*i+2];
-      //   }
-      //   else {
-      //      float* ptr = (float*)(&inducedDipoleVec[0]);
-      //      dx = ptr[3*i];
-      //      dy = ptr[3*i+1];
-      //      dz = ptr[3*i+2];
-      //   }
-      //   printf("dipole for atom %5d %12.5e%12.5e%12.5e\n", i+1, dx, dy, dz);
-      //}
-
-      //ufield();
-
-
 
 
       // subtract T.mu_0 from E -> residual = E - T.mu_0

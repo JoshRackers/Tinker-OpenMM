@@ -250,7 +250,7 @@ __device__ void computeOnePolarInteraction(PolarAtomData& atom1, PolarAtomData& 
     real rr7k = bn[3] - (1-cscale*dmpk7)*rr7;
     real rr9k = bn[4] - (1-cscale*dmpk9)*rr9;
 
-    printf("r: %12.4f, cscale: %12.4f wscale: %12.4f\n",r,cscale,wscale);
+    //printf("r: %12.4f, cscale: %12.4f wscale: %12.4f\n",r,cscale,wscale);
      // INSERT WSCALE IN HERE!!!!!!
     real rr5ik = bn[2] - (1-wscale*dmpik5)*rr5;
     real rr7ik = bn[3] - (1-wscale*dmpik7)*rr7;
@@ -611,7 +611,7 @@ extern "C" __global__ void computePolar(unsigned long long* __restrict__ forceBu
                 if (atom1 != atom2 && atom1 < NUM_ATOMS && atom2 < NUM_ATOMS) {
                     real c = computeCScaleFactor(covalent, j);
                     real w = computeWScaleFactor(covalent24, j);
-                    printf("w for atom %d and %d %12.4f\n",atom1+1,atom2+1,w);
+                    //printf("w for atom %d and %d %12.4f\n",atom1+1,atom2+1,w);
                     computeOnePolarInteraction(
                         data, localData[tbx + j], c, w, (real)0.5, energy, periodicBoxSize, invPeriodicBoxSize, periodicBoxVecX, periodicBoxVecY, periodicBoxVecZ);
                     //printf (" x==y atom = %d atom = %d, energy = %12.4f, palphas: %12.4f%12.4f\n", atom1+1, atom2+1, energy, palpha[atom1], palpha[atom2]);
@@ -637,7 +637,7 @@ extern "C" __global__ void computePolar(unsigned long long* __restrict__ forceBu
             atomicAdd(&torqueBuffers[atom1+PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long) (data.torque.y*0x100000000)));
             atomicAdd(&torqueBuffers[atom1+2*PADDED_NUM_ATOMS], static_cast<unsigned long long>((long long) (data.torque.z*0x100000000)));
 
-            printf ("POLAR nonPME forceBuffers for %d : %12.4f%12.4f%12.4f\n",atom1,data.force.x,data.force.y,data.force.z);
+            //printf ("POLAR nonPME forceBuffers for %d : %12.4f%12.4f%12.4f\n",atom1,data.force.x,data.force.y,data.force.z);
 
             //printf ("added to buffers \n");
 

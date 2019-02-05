@@ -1596,7 +1596,7 @@ __device__ void computeOneInducedInteraction(InducedAtomData& atom1, InducedAtom
     real dky = atom2.inducedDipole.y;
     real dkz = atom2.inducedDipole.z;
 
-    printf("dpl is %12.4f%12.4f%12.4f\n",dix,diy,diz);
+    //printf("dpl is %12.4f%12.4f%12.4f\n",dix,diy,diz);
 
     real alphai = atom1.palpha;
     real alphak = atom2.palpha;

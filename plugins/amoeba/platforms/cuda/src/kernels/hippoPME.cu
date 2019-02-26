@@ -1397,7 +1397,7 @@ eprecip(real4* __restrict__ posq, unsigned long long* __restrict__ forceBuffers,
   const int deriv1[] = {1, 4, 7, 8, 10, 15, 17, 13, 14, 19};
   const int deriv2[] = {2, 7, 5, 9, 13, 11, 18, 15, 19, 16};
   const int deriv3[] = {3, 8, 9, 6, 14, 16, 12, 19, 17, 18};
-  mixed energy = 0;
+  // mixed energy = 0;
   __shared__ real fracToCart[3][3];
   if (threadIdx.x == 0) {
     fracToCart[0][0] = GRID_SIZE_X * recipBoxVecX.x;
@@ -1438,34 +1438,88 @@ eprecip(real4* __restrict__ posq, unsigned long long* __restrict__ forceBuffers,
     real uix = inducedDipole_global[i * 3];
     real uiy = inducedDipole_global[i * 3 + 1];
     real uiz = inducedDipole_global[i * 3 + 2];
-    
+
+    real uip[3];
+    uip[0] = inducedDipolePolar_global[i*3];
+    uip[1] = inducedDipolePolar_global[i*3+1];
+    uip[2] = inducedDipolePolar_global[i*3+2];
+    printf(" OMM atom %3d, udir,udirp,%18.8lf%18.8lf%18.8lf%18.8lf%18.8lf%18.8lf\n", i+1,uix,uiy,uiz,uip[0],uip[1],uip[2]);
+
+
+    int ii1 = NUM_ATOMS;
+    int ii2 = NUM_ATOMS*2; int ii3 = NUM_ATOMS*3;
+    printf(" omm atom %3d, phid %18.8lf%18.8lf%18.8lf%18.8lf\n", i+1, phid[i], phid[ii1+i], phid[ii2+i], phid[ii3+i]);
+    printf(" omm atom %3d, phip %18.8lf%18.8lf%18.8lf%18.8lf\n", i+1, phip[i], phip[ii1+i], phip[ii2+i], phip[ii3+i]);
+    printf(" omm atom %3d, phdp %18.8lf%18.8lf%18.8lf%18.8lf\n", i+1, phidp[i], phidp[ii1+i], phidp[ii2+i], phidp[ii3+i]);
+    // self-torque
+/*
+    real tk1 = diy*uiz-diz*uiy;
+    real tk2 = diz*uix-dix*uiz;
+    real tk3 = dix*uiy-diy*uix;
+    tk1 *= (term * EPSILON_FACTOR);
+    tk2 *= (term * EPSILON_FACTOR);
+    tk3 *= (term * EPSILON_FACTOR);
+    printf(" OMM atom %3d, tk1,tk2,tk3,%18.8lf%18.8lf%18.8lf\n",i+1,tk1,tk2,tk3);
     torqueBuffers[i] +=
-        (long long)(0.5f * EPSILON_FACTOR *
-                    (multipole[3] * cphi[2] - multipole[2] * cphi[3] +
+        (long long)(EPSILON_FACTOR*term*(diy*uiz-diz*uiy)*0x100000000);
+    torqueBuffers[i + PADDED_NUM_ATOMS] +=
+        (long long)(EPSILON_FACTOR*term*(diz*uix-dix*uiz)*0x100000000);
+    torqueBuffers[i + PADDED_NUM_ATOMS * 2] +=
+        (long long)(EPSILON_FACTOR*term*(dix*uiy-diy*uix)*0x100000000);
+// */
+//*
+    torqueBuffers[i] +=
+        (long long)( EPSILON_FACTOR *
+                    (0.5f*(multipole[3] * cphi[2] - multipole[2] * cphi[3] +
                      2 * (multipole[6] - multipole[5]) * cphi[9] +
                      multipole[8] * cphi[7] + multipole[9] * cphi[5] -
-                     multipole[7] * cphi[8] - multipole[9] * cphi[6] +
+                     multipole[7] * cphi[8] - multipole[9] * cphi[6]) +
                      term*(diy*uiz-diz*uiy)) *
                     0x100000000);
 
     torqueBuffers[i + PADDED_NUM_ATOMS] +=
-        (long long)(0.5f * EPSILON_FACTOR *
-                    (multipole[1] * cphi[3] - multipole[3] * cphi[1] +
+        (long long)( EPSILON_FACTOR *
+                    (0.5f*(multipole[1] * cphi[3] - multipole[3] * cphi[1] +
                      2 * (multipole[4] - multipole[6]) * cphi[8] +
                      multipole[7] * cphi[9] + multipole[8] * cphi[6] -
-                     multipole[8] * cphi[4] - multipole[9] * cphi[7] +
+                     multipole[8] * cphi[4] - multipole[9] * cphi[7]) +
                      term * (diz*uix-dix*uiz)) *
                     0x100000000);
 
     torqueBuffers[i + PADDED_NUM_ATOMS * 2] +=
-        (long long)(0.5f * EPSILON_FACTOR *
+        (long long)( EPSILON_FACTOR *
+                    (0.5f*(multipole[2] * cphi[1] - multipole[1] * cphi[2] +
+                     2 * (multipole[5] - multipole[4]) * cphi[7] +
+                     multipole[7] * cphi[4] + multipole[9] * cphi[8] -
+                     multipole[7] * cphi[5] - multipole[8] * cphi[9]) +
+                     term * (dix*uiy-diy*uix)) *
+                    0x100000000);
+// */
+/*
+    torqueBuffers[i] +=
+        (long long)( EPSILON_FACTOR *
+                    (multipole[3] * cphi[2] - multipole[2] * cphi[3] +
+                     2 * (multipole[6] - multipole[5]) * cphi[9] +
+                     multipole[8] * cphi[7] + multipole[9] * cphi[5] -
+                     multipole[7] * cphi[8] - multipole[9] * cphi[6]) *
+                    0x100000000);
+
+    torqueBuffers[i + PADDED_NUM_ATOMS] +=
+        (long long)( EPSILON_FACTOR *
+                    (multipole[1] * cphi[3] - multipole[3] * cphi[1] +
+                     2 * (multipole[4] - multipole[6]) * cphi[8] +
+                     multipole[7] * cphi[9] + multipole[8] * cphi[6] -
+                     multipole[8] * cphi[4] - multipole[9] * cphi[7]) *
+                    0x100000000);
+
+    torqueBuffers[i + PADDED_NUM_ATOMS * 2] +=
+        (long long)( EPSILON_FACTOR *
                     (multipole[2] * cphi[1] - multipole[1] * cphi[2] +
                      2 * (multipole[5] - multipole[4]) * cphi[7] +
                      multipole[7] * cphi[4] + multipole[9] * cphi[8] -
-                     multipole[7] * cphi[5] - multipole[8] * cphi[9] +
-                     term * (dix*uiy-diy*uix)) *
+                     multipole[7] * cphi[5] - multipole[8] * cphi[9]) *
                     0x100000000);
-
+// */
     // Compute the force and energy.
 
     multipole[1] = fracDipole[i * 3];
@@ -1507,13 +1561,13 @@ eprecip(real4* __restrict__ posq, unsigned long long* __restrict__ forceBuffers,
         cinducedDipolePolar[1] * fracToCart[1][2] +
         cinducedDipolePolar[2] * fracToCart[2][2];
     real4 f = make_real4(0, 0, 0, 0);
-
+/*
     energy += (inducedDipole[0] + inducedDipolePolar[0]) * phi[i + NUM_ATOMS];
     energy +=
         (inducedDipole[1] + inducedDipolePolar[1]) * phi[i + NUM_ATOMS * 2];
     energy +=
         (inducedDipole[2] + inducedDipolePolar[2]) * phi[i + NUM_ATOMS * 3];
-
+*/
     for (int k = 0; k < 3; k++) {
       int j1 = deriv1[k + 1];
       int j2 = deriv2[k + 1];
@@ -1537,6 +1591,7 @@ eprecip(real4* __restrict__ posq, unsigned long long* __restrict__ forceBuffers,
       f.y += multipole[k] * phidp[i + NUM_ATOMS * deriv2[k]];
       f.z += multipole[k] * phidp[i + NUM_ATOMS * deriv3[k]];
     }
+
     f = make_real4(0.5f * EPSILON_FACTOR *
                        (f.x * fracToCart[0][0] + f.y * fracToCart[0][1] +
                         f.z * fracToCart[0][2]),
@@ -1547,15 +1602,18 @@ eprecip(real4* __restrict__ posq, unsigned long long* __restrict__ forceBuffers,
                        (f.x * fracToCart[2][0] + f.y * fracToCart[2][1] +
                         f.z * fracToCart[2][2]),
                    0);
+//*
     forceBuffers[i] -=
         static_cast<unsigned long long>((long long)(f.x * 0x100000000));
     forceBuffers[i + PADDED_NUM_ATOMS] -=
         static_cast<unsigned long long>((long long)(f.y * 0x100000000));
     forceBuffers[i + PADDED_NUM_ATOMS * 2] -=
         static_cast<unsigned long long>((long long)(f.z * 0x100000000));
+// */
   }
-  energyBuffer[blockIdx.x * blockDim.x + threadIdx.x] +=
-      0.25f * EPSILON_FACTOR * energy;
+//  energyBuffer[blockIdx.x * blockDim.x + threadIdx.x] +=
+//      0.5f * EPSILON_FACTOR * energy;
+// This coefficients was 0.25, changed to 0.5.
 }
 
 

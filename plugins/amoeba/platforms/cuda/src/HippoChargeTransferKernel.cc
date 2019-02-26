@@ -1331,6 +1331,14 @@ double CudaCalcHippoChargeTransferForceKernel::execute(ContextImpl &context, boo
           diagPCG<float>(maxIterations);
       }
 
+      // Copy inducedDipole values to inducedDipoleP
+      inducedDipole.copyTo(inducedDipoleP);
+
+      // compute fphid
+      ufield(inducedDipole, rsd_ll);
+
+
+
       // print induced dipoles
       std::vector<double> inducedDipoleVec;
       inducedDipoleVec.reserve(inducedDipole.getSize());
@@ -1359,14 +1367,16 @@ double CudaCalcHippoChargeTransferForceKernel::execute(ContextImpl &context, boo
 
       // compute real space polarization energy and force
 
+//*
       // induced dipole energy
       void* muDotMpoleArgs[] = {
          &inducedDipole.getDevicePointer(),
          &mpoleField.getDevicePointer(),
          &cu.getEnergyBuffer().getDevicePointer()};
       cu.executeKernel(muDotMpoleKernel, muDotMpoleArgs, numAtoms);
+// */
 
-
+//*
       void *argsPolar[] = {
           &cu.getForce().getDevicePointer(),
           &torque.getDevicePointer(),
@@ -1392,11 +1402,16 @@ double CudaCalcHippoChargeTransferForceKernel::execute(ContextImpl &context, boo
       int numForceThreadBlocks = nb.getNumForceThreadBlocks();
    
       cu.executeKernel(epolarKernel, argsPolar, numForceThreadBlocks * energyAndForceThreads, energyAndForceThreads);
+// */
 
 
+//*
       // recip energy/force/torque
-
-      void* fphi_to_cphi_ind_args[] = {&fphi.getDevicePointer(), &cphi.getDevicePointer(),
+      // fphi -- what ??
+      //void* fphi_to_cphi_ind_args[] = {&fphi.getDevicePointer(), &cphi.getDevicePointer(),
+      //                       recipBoxVectorPointer[0], recipBoxVectorPointer[1],
+      //                       recipBoxVectorPointer[2]};
+      void* fphi_to_cphi_ind_args[] = {&phidp.getDevicePointer(), &cphi.getDevicePointer(),
                              recipBoxVectorPointer[0], recipBoxVectorPointer[1],
                              recipBoxVectorPointer[2]};
       cu.executeKernel(fphi_to_cphi_ind_kernel, fphi_to_cphi_ind_args, numAtoms);
@@ -1421,7 +1436,7 @@ double CudaCalcHippoChargeTransferForceKernel::execute(ContextImpl &context, boo
                         recipBoxVectorPointer[2]};
       cu.executeKernel(eprecip_kernel, eprecip_args, numAtoms);
 
-
+// */
 
 
 
